@@ -127,12 +127,12 @@
 % *** GRAPHICS RELATED PACKAGES ***
 %
 \ifCLASSINFOpdf
-  % \usepackage[pdftex]{graphicx}
+  \usepackage[pdftex]{graphicx}
   % declare the path(s) where your graphic files are
-  % \graphicspath{{../pdf/}{../jpeg/}}
+  \graphicspath{{images/}}
   % and their extensions so you won't have to specify these with
   % every instance of \includegraphics
-  % \DeclareGraphicsExtensions{.pdf,.jpeg,.png}
+  \DeclareGraphicsExtensions{.pdf,.jpeg,.png}
 \else
   % or other class option (dvipsone, dvipdf, if not using dvips). graphicx
   % will default to the driver specified in the system graphics.cfg if no
@@ -352,7 +352,7 @@
 %
 % paper title
 % can use linebreaks \\ within to get better formatting as desired
-\title{Modeling at Scale}
+\title{Modeling at Scale in a Heterogenous Environment}
 
 
 % author names and affiliations
@@ -401,7 +401,7 @@ New York, USA\\
 
 
 \begin{abstract}
-We describe a data platform for running multiple large data processing jobs and managing dependencies between these jobs.  Using this platform we can link Pig, Hadoop, and other jobs together.  This allows us decompose complex modeling workflows and to choose the language and framework appropriate for the task.  We provide details of a distributed alternating direction method of multipliers (ADMM) implementation and how we have connected this job with Pig and Cascading jobs in a production environment.
+We describe a data platform for running multiple large data processing jobs and managing dependencies between these jobs.  Using this platform we link Pig, Hadoop, and other jobs together.  This allows us decompose complex modeling workflows and to choose the language and framework appropriate for the task.  We provide details of a distributed alternating direction method of multipliers (ADMM) implementation and how we have integrated this job with Pig and Cascading jobs in a production environment.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -422,25 +422,33 @@ cloud computing; algorithms; workflow
 
 
 \section{Introduction}
-% no \IEEEPARstart
-This demo file is intended to serve as a ``starter file''
-for IEEE conference papers produced under \LaTeX\ using
-IEEEtran.cls version 1.7 and later.
+As the Hadoop ecosystem has expanded specific Hadoop frameworks are better suited for implementing certain models.  For example, Pig's procedural nature make it great for expressing data flow, but make it a challenge to use for iterative algorithms.  Iterative algorithms can be more fluently implemented in raw Hadoop Map-Reduce using Java's control flow statements.
 
-All manuscripts must be in English. These guidelines include complete descriptions of the fonts, spacing, and related information for producing your proceedings manuscripts. Please follow them and if you have any questions, direct them to the production editor in charge of your proceedings at Conference Publishing Services (CPS): Phone +1 (714) 821-8380 or Fax +1 (714) 761-1784.
-% You must have at least 2 lines in the paragraph with the drop letter
-% (should never be an issue)
+We have built a data platform that allows us to implement any modeling task expressible in Hadoop or a Hadoop-based abstraction, e.g. Pig, Cascading, Scalding, or Cascalog.  We can then compose workflows by describing dependencies between these tasks, which may each be written in different languages.  
 
-\subsection{Subsection Heading Here}
-Subsection text here.
+This framework is used nightly to build a large linear regression and logistic regression model using hundreds of gigabytes of data.  To efficiently build models we divide our workflow into three tasks: (1) data aggregation and then two parallel tasks: (2) linear regression and (3) logistic regression.  We will provide details concerning our implementation of the Alternating Direction Method of Multipliers and describe how this integrates with a data aggregation and linear regression tasks to compose an abstract modeling framework.
 
 
-\subsubsection{Subsubsection Heading Here}
-Subsubsection text here.
+\section{Workflow Management}
+The data prerequisites of each tasks provide an implicit dependency structure between tasks.
 
-\section{Type style and Fonts}
-Wherever Times is specified, Times Roman or Times New Roman may be used. If neither is available on your system, please use the font closest in appearance to Times. Avoid using bit-mapped fonts if possible. True-Type 1 or Open Type fonts are preferred. Please embed symbol fonts, as well, for math, etc.
+\begin{figure}[!t]
+\centering
+\includegraphics[width=3.5in]{model_workflow_horizontal}
+\caption{Task Workflow.  Solid lines show dependencies between different tasks.  The dashed line indicates an optional alternative path.}
+\label{workflow}
+\end{figure}
 
+\subsection{Data Aggregation}
+Data aggregation is synonymous with an Extract, Transform, and Load (ETL) step.  This encompasses everything from 
+
+\subsection{Linear Regression}
+Linear regression can be exactly perform using matrix operations.  To perform these operations neither saved state nor iteration is required.  We use Pig for this task.
+
+\section{Using ADMM for Logistic Regression}
+To perform logistic regression at scale we implemented the distributed alternating direction method of multipliers (ADMM) algorithm described by Boyd et al. [REF].  ADMM is an iterative algorithm appropriate for convex optimization.  Following the example in [Boyd REF], we implement ADMM in Hadoop MapReduce.  We use a custom driver to set each iterations parameters based on the results of the previous iteration and check for stopping conditions.
+
+We have implemented ADMM in a generalized fashion and released it as an open source Java package.\footnote{https://github.comintentmedia/admm}
 
 % An example of a floating figure using the graphicx package.
 % Note that \label must occur AFTER (or within) \caption.
@@ -566,8 +574,8 @@ The conclusion goes here. this is more of the conclusion
 \begin{thebibliography}{1}
 
 \bibitem{IEEEhowto:kopka}
-H.~Kopka and P.~W. Daly, \emph{A Guide to \LaTeX}, 3rd~ed.\hskip 1em plus
-  0.5em minus 0.4em\relax Harlow, England: Addison-Wesley, 1999.
+S.~Boyd et al., \emph{Distributed Optimization and Statistical Learning via the Alternating Direction Method of Multipliers}, Foundatinos and Trendas in Machine Learning.\hskip 1em plus
+  0.5em minus 0.4em\relax NOW, 2010.
 
 \end{thebibliography}
 
