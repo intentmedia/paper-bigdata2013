@@ -169,7 +169,7 @@
 
 
 % *** MATH PACKAGES ***
-%
+\usepackage{amssymb}%
 %\usepackage[cmex10]{amsmath}
 % A popular package from the American Mathematical Society that provides
 % many useful and powerful commands for dealing with mathematics. If using
@@ -352,7 +352,7 @@
 %
 % paper title
 % can use linebreaks \\ within to get better formatting as desired
-\title{Modeling at Scale in a Heterogenous Environment}
+\title{Generic Optimization at Scale with the Alternating Direction Method of Multipliers Algorithm}
 
 
 % author names and affiliations
@@ -401,11 +401,11 @@ New York, USA\\
 
 
 \begin{abstract}
-We describe a data platform for running multiple large data processing jobs and managing dependencies between these jobs.  Using this platform we link Pig, Hadoop, and other jobs together.  This allows us decompose complex modeling workflows and to choose the language and framework appropriate for the task.  We provide details of a distributed alternating direction method of multipliers (ADMM) implementation and how we have integrated this job with Pig and Cascading jobs in a production environment.
+Although many well known solutions exist, implementing iterative algorithms at scale is a non-trivial exercise.  We describe our experience implementing the Alternating Direction Method of Multipliers (ADMM) algorithm in Hadoop Map Reduce and how we use to compute logistic regression as a module in a larger modeling pipeline.  We have released an open source ADMM Map Reduce algorithm, which you can easily integrate with existing Hadoop code.
 \end{abstract}
 
 \begin{IEEEkeywords}
-cloud computing; algorithms; workflow
+distributed algorithms; optimization; analytics models
 \end{IEEEkeywords}
 
 
@@ -422,14 +422,17 @@ cloud computing; algorithms; workflow
 
 
 \section{Introduction}
-As the Hadoop ecosystem has expanded specific Hadoop frameworks are better suited for implementing certain models.  For example, Pig's procedural nature make it great for expressing data flow, but make it a challenge to use for iterative algorithms.  Iterative algorithms can be more fluently implemented in raw Hadoop Map-Reduce using Java's control flow statements.
+When modeling at scale the solution not only needs to work, it needs to work on large amounts in a reasonable amount of time.  This often leads to a two step process of model building, in which the first step is to prototype a solution on a sample of the dataset, and the second is to convert the solution to a form that is distributed and parallel.  Map Reduce is the most common programming model for working with large distributed data sets \ref{google-mr-paper} and Hadoop \ref{hadoop} is the most popular implementation of Map Reduce.
 
-We have built a data platform that allows us to implement any modeling task expressible in Hadoop or a Hadoop-based abstraction, e.g. Pig, Cascading, Scalding, or Cascalog.  We can then compose workflows by describing dependencies between these tasks, which may each be written in different languages.  
+In our case, we built a prototype conditional model of the form:
+$$\hat{s} = \mathbb{E}(A)P(B|C)$$
+where the expectation $\mathbb{E}(A)$ is calculated using linear regression and the conditional probability $P(B|C)$ is calculated using logistic regression.
 
-This framework is used nightly to build a large linear regression and logistic regression model using hundreds of gigabytes of data.  To efficiently build models we divide our workflow into three tasks: (1) data aggregation and then two parallel tasks: (2) linear regression and (3) logistic regression.  We will provide details concerning our implementation of the Alternating Direction Method of Multipliers and describe how this integrates with a data aggregation and linear regression tasks to compose an abstract modeling framework.
+A common method for solving logistic regression problems is maximum likelihood estimation (MLE), an iterative method which converges on the solution.  MLE is not suitable for use with Map Reduce because it requires that all the data be accessible in one place, i.e. the computations can be broken down into discrete chunks.  The ADMM algorithm is a generic optimization algorithm appropriate for convex optimization and useful in many common modeling situations \ref{boyd}, including logistic regression.  On each iteration the ADMM algorithm calculates optimal local values over subsets of the data and then aggregates these values to find the global solution.
 
+\section{Implementation}
+To efficiently build models we divide our workflow into three tasks: (1) data aggregation and then two parallel tasks: (2) linear regression and (3) logistic regression.  We will provide details concerning our implementation of the Alternating Direction Method of Multipliers and describe how this integrates with a data aggregation and linear regression tasks to compose an abstract modeling framework.
 
-\section{Workflow Management}
 The data prerequisites of each tasks provide an implicit dependency structure between tasks.
 
 \begin{figure}[!t]
@@ -446,9 +449,9 @@ Data aggregation is synonymous with an Extract, Transform, and Load (ETL) step. 
 Linear regression can be exactly perform using matrix operations.  To perform these operations neither saved state nor iteration is required.  We use Pig for this task.
 
 \section{Using ADMM for Logistic Regression}
-To perform logistic regression at scale we implemented the distributed alternating direction method of multipliers (ADMM) algorithm described by Boyd et al. [REF].  ADMM is an iterative algorithm appropriate for convex optimization.  Following the example in [Boyd REF], we implement ADMM in Hadoop MapReduce.  We use a custom driver to set each iterations parameters based on the results of the previous iteration and check for stopping conditions.
+To perform logistic regression at scale we implemented the distributed alternating direction method of multipliers (ADMM) algorithm described by Boyd et al. [REF].  Following the example in [Boyd REF], we implement ADMM in Hadoop MapReduce.  We use a custom driver to set each iterations parameters based on the results of the previous iteration and check for stopping conditions.
 
-We have implemented ADMM in a generalized fashion and released it as an open source Java package.\footnote{https://github.comintentmedia/admm}
+We have implemented ADMM in a generalized fashion and released it as an open source Java package.\footnote{https://github.com/intentmedia/admm}
 
 % An example of a floating figure using the graphicx package.
 % Note that \label must occur AFTER (or within) \caption.
