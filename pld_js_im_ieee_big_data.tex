@@ -401,7 +401,7 @@ New York, USA\\
 
 
 \begin{abstract}
-Although many well known solutions exist, implementing iterative algorithms at scale is a non-trivial exercise.  We describe our experience implementing the Alternating Direction Method of Multipliers (ADMM) algorithm in Hadoop Map Reduce and how we use to compute logistic regression as a module in a larger modeling pipeline.  We have released an open source ADMM Map Reduce algorithm, which you can easily integrate with existing Hadoop code.
+Although many well known solutions exist, implementing iterative algorithms at scale is a non-trivial exercise.  We describe our experience implementing the Alternating Direction Method of Multipliers (ADMM) algorithm in Apache Hadoop Map Reduce and how we use the ADMM algorithm to compute logistic regression as a subcomponent of a larger modeling pipeline.  We have released an open source ADMM Map Reduce algorithm, which you can easily integrate with existing Hadoop code.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -422,18 +422,18 @@ distributed algorithms; optimization; analytics models
 
 
 \section{Introduction}
-When modeling at scale the solution not only needs to work, it needs to work on large amounts in a reasonable amount of time.  This often leads to a two step process of model building, in which the first step is to prototype a solution on a sample of the dataset, and the second is to convert the solution to a form that is distributed and parallel.  Map Reduce is the most common programming model for working with large distributed data sets \ref{google-mr-paper} and Hadoop \ref{hadoop} is the most popular implementation of Map Reduce.
+When modeling at scale the solution not only needs function correctly, it needs to function on large amounts of data in a reasonable amount of time.  In this context, modeling is often approached in a two step process, the first step is to prototype a solution on a sample of the dataset, and the second step is to convert the solution to a form that is distributed and parallel.  Map Reduce is the most common programming model for working with large distributed data sets \cite{google-mr-paper} and Apache Hadoop \cite{hadoop} is the most popular implementation of Map Reduce.
 
-In our case, we built a prototype conditional model of the form:
-$$\hat{s} = \mathbb{E}(A)P(B|C)$$
-where the expectation $\mathbb{E}(A)$ is calculated using linear regression and the conditional probability $P(B|C)$ is calculated using logistic regression.
+In our case, the model that we prototyped was of the form:
+$$\hat{s} = \mathbb{E}(A)P(B|C),$$
+where the expectation, $\mathbb{E}(A)$, is calculated using linear regression and the conditional probability, $P(B|C)$, is calculated using logistic regression.  This model performed quite well in prototyping, and the next step was to test it on a production scale dataset.  We used the Apache Hadoop Map Reduce framework to model at scale, and given our algorithm, we required an implementation of logistic and linear regression that could run on Hadoop.
 
-A common method for solving logistic regression problems is maximum likelihood estimation (MLE), an iterative method which converges on the solution.  MLE is not suitable for use with Map Reduce because it requires that all the data be accessible in one place, i.e. the computations can be broken down into discrete chunks.  The ADMM algorithm is a generic optimization algorithm appropriate for convex optimization and useful in many common modeling situations \ref{boyd}, including logistic regression.  On each iteration the ADMM algorithm calculates optimal local values over subsets of the data and then aggregates these values to find the global solution.
+The simplest approach to solving logistic regression problems is maximum likelihood estimation (MLE), an iterative method which converges on the solution.  Because MLE requires that all the data be accessible in one place, i.e. the computations cannot be broken down into discrete chunks, it is not suitable for the Map Reduce programming model.  However, the ADMM algorithm is a generic optimization algorithm appropriate for convex optimization which can be distributed.  ADMM is applicable to many common modeling situations \cite{boyd}, including logistic regression.  On each iteration the ADMM algorithm calculates optimal local values over subsets of the data and then aggregates these values to find the global solution.
 
-\section{Implementation}
-To efficiently build models we divide our workflow into three tasks: (1) data aggregation and then two parallel tasks: (2) linear regression and (3) logistic regression.  We will provide details concerning our implementation of the Alternating Direction Method of Multipliers and describe how this integrates with a data aggregation and linear regression tasks to compose an abstract modeling framework.
+In section \ref{sec:imp} we will provide details concerning our implementation of the Alternating Direction Method of Multipliers and describe how this integrates with a data aggregation and linear regression task.  In section \ref{sec:results} we compare the computation time of running ADMM on different size datasets.  In section \ref{sec:related} we recent work related to iterative optimization with Hadoop, and in section \ref{sec:conc} we conclude and mention future work.
 
-The data prerequisites of each tasks provide an implicit dependency structure between tasks.
+\section{Implementation}\label{sec:imp}
+To efficiently build models we divide our workflow into three tasks: (1) data aggregation and then two parallel tasks: (2) linear regression and (3) logistic regression.  The data prerequisites of each tasks provide an implicit dependency structure between tasks.  The data aggregation step produces a set of training data---feature and target values---that are then used in both the linear and logistic regression steps.
 
 \begin{figure}[!t]
 \centering
@@ -442,13 +442,21 @@ The data prerequisites of each tasks provide an implicit dependency structure be
 \label{workflow}
 \end{figure}
 
-\subsection{Data Aggregation}
+\subsection{Logistic Regression with ADMM}
+
+Map Reduce tasks consist of three components: a mapper which applies a function to a set of values, a reducer which aggregates multiple values, and a driver which handles input arguments and coordinates execution of the mapper and reducer.  In our case we also use the driver to determine if the algorithm has converged.  If it has not converged we begin the next iteration, if it has converged we write the results to persistent storage.
+
+The mapper computes the function 
+
+\subsection{Modeling Pipeline}
+
+\subsubsection{Data Aggregation}
 Data aggregation is synonymous with an Extract, Transform, and Load (ETL) step.  This encompasses everything from 
 
-\subsection{Linear Regression}
+\subsubsection{Linear Regression}
 Linear regression can be exactly perform using matrix operations.  To perform these operations neither saved state nor iteration is required.  We use Pig for this task.
 
-\section{Using ADMM for Logistic Regression}
+\section{Results}\label{sec:results}
 To perform logistic regression at scale we implemented the distributed alternating direction method of multipliers (ADMM) algorithm described by Boyd et al. [REF].  Following the example in [Boyd REF], we implement ADMM in Hadoop MapReduce.  We use a custom driver to set each iterations parameters based on the results of the previous iteration and check for stopping conditions.
 
 We have implemented ADMM in a generalized fashion and released it as an open source Java package.\footnote{https://github.com/intentmedia/admm}
@@ -535,10 +543,10 @@ We have implemented ADMM in a generalized fashion and released it as an open sou
 % footnotes above bottom floats. This can be corrected via the \fnbelowfloat
 % command of the stfloats package.
 
-\section{Related Work}
+\section{Related Work}\label{sec:related}
 The related work goes here. this is more of the related work.
 
-\section{Conclusion}
+\section{Conclusion}\label{sec:conc}
 The conclusion goes here. this is more of the conclusion
 
 % conference papers do not normally have an appendix
