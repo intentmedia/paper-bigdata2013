@@ -403,7 +403,7 @@ New York, USA\\
 
 
 \begin{abstract}
-Although many well known solutions exist, implementing iterative algorithms at scale is a non-trivial exercise.  We describe our experience implementing the Alternating Direction Method of Multipliers (ADMM) algorithm in Apache Hadoop Map Reduce and how we use the ADMM algorithm to compute logistic regression as a subcomponent of a larger modeling pipeline.  We have released an open source ADMM Map Reduce algorithm, which you can easily integrate with existing Hadoop code.
+Although many well known solutions exist, implementing iterative algorithms at scale is a non-trivial exercise.  We describe our experience implementing the Alternating Direction Method of Multipliers (ADMM) algorithm in Apache Hadoop Map Reduce and how we use the ADMM algorithm to compute logistic regression as a subcomponent in a larger modeling pipeline.  We have released an open source ADMM Map Reduce algorithm, which easily integrates into existing Hadoop code.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -424,20 +424,22 @@ distributed algorithms; optimization; analytics models
 
 
 \section{Introduction}
-When modeling at scale the solution not only needs function correctly, it needs to function on large amounts of data in a reasonable amount of time.  In this context, modeling is often approached in a two step process, the first step is to prototype a solution on a sample of the dataset, and the second step is to convert the solution to a form that is distributed and parallel.  Map Reduce is the most common programming model for working with large distributed data sets \cite{google-mr-paper} and Apache Hadoop \cite{hadoop} is the most popular implementation of Map Reduce.
+When modeling at scale the solution not only needs to function correctly, it needs to function on large amounts of data in a reasonable amount of time.  In this context, modeling is often approached in a two step process, the first step is to prototype a solution on a sample of the dataset, and the second step is to convert the solution to a form that is distributed and parallel.  Map Reduce is the most common programming model for working with large distributed data sets \cite{google-mr-paper} and Apache Hadoop \cite{hadoop} is the most popular implementation of Map Reduce.
 
 In our case, the model that we prototyped was of the form:
 \begin{equation}
-\hat{v} = \mathbb{E}(C)P(b|A),
+\hat{v} = \mathbb{E}(C)P(b|\mathbf{A}),
 \end{equation}
-where the expectation, $\mathbb{E}(C)$, is calculated using linear regression and the conditional probability, $P(b|A)$, is calculated using logistic regression.  This model performed quite well in prototyping, and the next step was to test it on a production scale dataset.  We used the Apache Hadoop Map Reduce framework to model at scale, and given our algorithm, we required an implementation of logistic and linear regression that could run on Hadoop.
+where the expectation, $\mathbb{E}(C)$, is calculated using linear regression and the conditional probability, $P(b|\mathbf{A})$, is calculated using logistic regression.  This model performed quite well in prototyping, and the next step was to test it on a production scale dataset.  We use the Apache Hadoop Map Reduce framework to model at scale, and given our algorithm, we required an implementation of logistic and linear regression that could run on Hadoop.
 
-The simplest approach to solving logistic regression problems is maximum likelihood estimation (MLE), an iterative method which converges on the solution.  Because MLE requires that all the data be accessible in one place, i.e. the computations cannot be broken down into discrete chunks, it is not suitable for the Map Reduce programming model.  However, the ADMM algorithm is a generic optimization algorithm appropriate for convex optimization which can be distributed.  ADMM is applicable to many common modeling situations \cite{boyd}, including logistic regression.  On each iteration the ADMM algorithm calculates optimal local values over subsets of the data and then aggregates these values to find the global solution.
+The simplest approach to solving logistic regression problems is maximum likelihood estimation (MLE), an iterative method which converges on the solution.  Because MLE requires that all the data be accessible in one place the computations cannot be broken down into discrete chunks. Because of this MLE it is not suitable for the Map Reduce programming model.  However, the ADMM algorithm is a generic optimization algorithm calculates on each label independently and is therefore amenable to distributing computations over multiple nodes and the Map Reduce programming model.
 
-In section \ref{sec:imp} we will provide details concerning our implementation of the Alternating Direction Method of Multipliers and describe how this integrates with a data aggregation and linear regression task.  In section \ref{sec:results} we compare the computation time of running ADMM on different size datasets.  In section \ref{sec:related} we recent work related to iterative optimization with Hadoop, and in section \ref{sec:conc} we conclude and mention future work.
+The ADMM algorithm is applicable to many common modeling scenarios \cite{boyd}, including convex optimization and logistic regression.  On each iteration the ADMM algorithm optimizes the objective function for each label and then aggregates these values to find the global solution.  This allows us to distribute the objective function computations to a set of distributed processors.
+
+In section \ref{sec:imp} we provide details concerning our implementation of the ADMM algorithm and describe how this integrates with a data aggregation and linear regression task.  In section \ref{sec:results} we compare the computation time of ADMM on different size datasets.  In section \ref{sec:related} we review recent work related to iterative optimization with Hadoop, and in section \ref{sec:conc} we conclude and mention future work.
 
 \section{Implementation}\label{sec:imp}
-To efficiently build models we divide our workflow into three tasks: (1) data aggregation and then two parallel tasks: (2) linear regression and (3) logistic regression.  The data prerequisites of each tasks provide an implicit dependency structure between tasks.  The data aggregation step produces a set of training data---feature and target values---that are then used in both the linear and logistic regression steps.
+To efficiently build models we divide our workflow into three tasks: (1) data aggregation and two parallel tasks: (2) linear regression and (3) logistic regression.  The data prerequisites of each tasks provide an implicit dependency structure between tasks.  The data aggregation step produces a set of training data---feature and target values---that are then used in both the linear and logistic regression steps.
 
 \begin{figure}[!t]
 \centering
@@ -449,14 +451,14 @@ To efficiently build models we divide our workflow into three tasks: (1) data ag
 \subsection{Logistic Regression with ADMM}
 Given a matrix of features $A\in\mathbf{R}^{n\times m}$ and a vector of their labels $b\in\{-1,1\}$, our goal is to compute the probability $\text{Pr}(B_i=b_i|\mathbf{A}_i)$ for each row $0<i\leq n$.
 
-To compute this probability we solve a logistic regression function using ADMM.  We begin by expressing the logistic regression problem in ADMM form as
+To compute this probability we solve a logistic regression function using ADMM.  We begin by expressing the logistic regression problem in ADMM form as:
 \begin{align*}
 \text{minimize}&\quad (1/2)\|Ax-b\|_2^2+\lambda\|z\|_1\\
 \text{subject to}&\quad Fx-z=0,
 \end{align*}
 where we have introduced the regularization factor $\lambda$, as well as the $x$ and $z$ variables.
 
-Given this form we construct the ADMM algorithm
+Given this form we construct the ADMM algorithm:
 \begin{align*}
 x_i^{k+1} :=&\quad \min_x \sum_{j=1}^Nf(-A_jx\times b_j) + \dfrac{\rho^k}{2}\|x - z_i + u_i\|_2^2\\
 \\
@@ -468,11 +470,11 @@ z_i^{k+1} :=&\quad \begin{cases}
 \\
 u_i^{k+1} :=&\quad u_i^k + x_i^{k+1} + z_i^{k+1},
 \end{align*}
-where $f$ is defined as $f(x)=\log(1+\exp(-x))$, $m$ is the number of mappers (explained below), and the penalty parameter $\rho^k$, for iteration $k$, is used as the step size.
+where $f$ is defined as $f(x)=\log(1+\exp(-x))$, $m$ is the number of mappers (explained below), and $\rho^k$ is the penalty parameter for iteration $k$, which is used as the step size.
 
-Map Reduce tasks consist of three components: a mapper which applies a function to a set of values, a reducer which aggregates multiple values, and a driver which handles input arguments and coordinates execution of the mappers and reducers.  To apply ADMM to Map Reduce we use multiple mappers, each of which performs the resource intensive task of computing the current $x_i^{k+1}$.  After all mappers have completed their computations, we use a single reducer to compute the $z_i^{k+1}$ and $u_i^{k+1}$ updates.
+Map Reduce tasks consist of three components: mappers which apply a function to a set of values, reducers which aggregate multiple values, and a driver which handles input arguments and coordinates execution of the mappers and reducers.  To apply ADMM in the context of Map Reduce we use multiple mappers, each of which performs the resource intensive task of computing the current $x_i^{k+1}$.  After all mappers have completed their computations, we use a single reducer to compute the $z_i^{k+1}$ and $u_i^{k+1}$ updates.
 
-We also use the reducer to update the penalty parameter $\rho$.  The amount of iterations before convergence depends upon the $\rho$ parameter and hand-tuning the $\rho$ parameter can take a significant amount of time, because we must wait for a complete algorithm to complete.  By varying the penalty parameter we can reduce the performance impact of our initial choice of $\rho$, and avoid spending time hand-tuning $\rho$.  We use the update scheme suggested in \cite{boyd} to update $\rho$ on each iteration:
+We also use the reducer to update the penalty parameter $\rho$.  The number of iterations before convergence depends upon the $\rho$ parameter, and hand-tuning the $\rho$ parameter can take a significant amount of time.  We must wait for the algorithm to complete before determining the efficacy of the chosen $\rho$.  By varying the penalty parameter we can reduce the performance impact of our initial choice of $\rho$, and avoid spending time hand-tuning $\rho$.  We use the update scheme suggested in \cite{boyd} to update $\rho$ on each iteration:
 \begin{equation}
 \rho^{k+1}:=\begin{cases}
   \tau^{\text{incr}}\rho^k&\quad \text{if $\|r^k\|_2>\mu\|s^k\|_2$}\\
@@ -480,22 +482,25 @@ We also use the reducer to update the penalty parameter $\rho$.  The amount of i
   \rho^k&\quad \text{otherwise,}
 \end{cases}
 \end{equation}
-where $\mu>1$, $\tau^{\text{incr}}>1$, and $\tau^{\text{decr}}>1$ are parameters, where we used the typical values of $\mu=10$ and $\tau^{\text{incr}}=\tau^{\text{decr}}=2$.
+where $\mu>1$, $\tau^{\text{incr}}>1$, and $\tau^{\text{decr}}>1$ are parameters, and we have used the typical values of $\mu=10$ and $\tau^{\text{incr}}=\tau^{\text{decr}}=2$.
 
 After having completed a mapper and reducer cycle, one iteration of the algorithm has finished and control returns to the driver.  In addition to initiating the mapper and reducer tasks, the ADMM driver determines if the algorithm has converged.  If it has not converged we distribute the $z_i$ and $u_i$ to the mappers and begin the next iteration, if it has converged we write the results to persistent storage (a bucket on Amazon S3) and exit.
 
-\subsection{Modeling Pipeline}
+\textbf{TODO} BFGS.
+
+Wherever feasible we have made the implementation of the ADMM algorithm generic.  Arguments to the driver allow users to exclude columns from the input data, add an intercept, set the initial $\rho$, maximum number of iterations, and of course the input and output locations. We have released an implementation of the ADMM algorithm for Hadoop as an open source Java package.\footnote{https://github.com/intentmedia/admm}.
+
+\subsection{Modeling Workflow}
+The other steps in our modeling workflow are less algorithmically involved than computing logistic regression.
 
 \subsubsection{Data Aggregation}
-Data aggregation is synonymous with an Extract, Transform, and Load (ETL) step.  This encompasses everything from 
+The data aggregation is n Extract, Transform, and Load (ETL) step.  In this step we join multiple data sources together and transform data in order to extract meaningful signals.  We use the data processing and query library Cascalog to perform our data aggregation step.  Using Cascalog we can fluently express the relationships between data sources and tightly integrate with existing our Java codebase.
 
 \subsubsection{Linear Regression}
-Linear regression can be exactly perform using matrix operations.  To perform these operations neither saved state nor iteration is required.  We use Pig for this task.
+Linear regression can be exactly perform using matrix operations.  To perform these operations we require neither saved state nor iterations.  We use Pig in combination with matrix specific user defined functions to perform linear regression.
 
 \section{Results}\label{sec:results}
-To perform logistic regression at scale we implemented the distributed alternating direction method of multipliers (ADMM) algorithm described by Boyd et al. [REF].  Following the example in [Boyd REF], we implement ADMM in Hadoop MapReduce.  We use a custom driver to set each iterations parameters based on the results of the previous iteration and check for stopping conditions.
-
-We have implemented ADMM in a generalized fashion and released it as an open source Java package.\footnote{https://github.com/intentmedia/admm}
+To evaluate the performance of the ADMM algorithm we ran it on test datasets of varying sizes.
 
 % An example of a floating figure using the graphicx package.
 % Note that \label must occur AFTER (or within) \caption.
