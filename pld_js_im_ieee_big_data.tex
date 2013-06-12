@@ -170,6 +170,8 @@
 
 % *** MATH PACKAGES ***
 \usepackage{amssymb}%
+\usepackage{amsmath}%
+\DeclareMathOperator*{\Min}{Min}
 %\usepackage[cmex10]{amsmath}
 % A popular package from the American Mathematical Society that provides
 % many useful and powerful commands for dealing with mathematics. If using
@@ -425,8 +427,10 @@ distributed algorithms; optimization; analytics models
 When modeling at scale the solution not only needs function correctly, it needs to function on large amounts of data in a reasonable amount of time.  In this context, modeling is often approached in a two step process, the first step is to prototype a solution on a sample of the dataset, and the second step is to convert the solution to a form that is distributed and parallel.  Map Reduce is the most common programming model for working with large distributed data sets \cite{google-mr-paper} and Apache Hadoop \cite{hadoop} is the most popular implementation of Map Reduce.
 
 In our case, the model that we prototyped was of the form:
-$$\hat{s} = \mathbb{E}(A)P(B|C),$$
-where the expectation, $\mathbb{E}(A)$, is calculated using linear regression and the conditional probability, $P(B|C)$, is calculated using logistic regression.  This model performed quite well in prototyping, and the next step was to test it on a production scale dataset.  We used the Apache Hadoop Map Reduce framework to model at scale, and given our algorithm, we required an implementation of logistic and linear regression that could run on Hadoop.
+\begin{equation}
+\hat{v} = \mathbb{E}(C)P(b|A),
+\end{equation}
+where the expectation, $\mathbb{E}(C)$, is calculated using linear regression and the conditional probability, $P(b|A)$, is calculated using logistic regression.  This model performed quite well in prototyping, and the next step was to test it on a production scale dataset.  We used the Apache Hadoop Map Reduce framework to model at scale, and given our algorithm, we required an implementation of logistic and linear regression that could run on Hadoop.
 
 The simplest approach to solving logistic regression problems is maximum likelihood estimation (MLE), an iterative method which converges on the solution.  Because MLE requires that all the data be accessible in one place, i.e. the computations cannot be broken down into discrete chunks, it is not suitable for the Map Reduce programming model.  However, the ADMM algorithm is a generic optimization algorithm appropriate for convex optimization which can be distributed.  ADMM is applicable to many common modeling situations \cite{boyd}, including logistic regression.  On each iteration the ADMM algorithm calculates optimal local values over subsets of the data and then aggregates these values to find the global solution.
 
@@ -443,10 +447,42 @@ To efficiently build models we divide our workflow into three tasks: (1) data ag
 \end{figure}
 
 \subsection{Logistic Regression with ADMM}
+Given a matrix of features $A\in\mathbf{R}^{n\times m}$ and a vector of their labels $b\in\{-1,1\}$, our goal is to compute the probability $\text{Pr}(B_i=b_i|\mathbf{A}_i)$ for each row $0<i\leq n$.
 
-Map Reduce tasks consist of three components: a mapper which applies a function to a set of values, a reducer which aggregates multiple values, and a driver which handles input arguments and coordinates execution of the mapper and reducer.  In our case we also use the driver to determine if the algorithm has converged.  If it has not converged we begin the next iteration, if it has converged we write the results to persistent storage.
+To compute this probability we solve a logistic regression function using ADMM.  We begin by expressing the logistic regression problem in ADMM form as
+\begin{align*}
+\text{minimize}&\quad (1/2)\|Ax-b\|_2^2+\lambda\|z\|_1\\
+\text{subject to}&\quad Fx-z=0,
+\end{align*}
+where we have introduced the regularization factor $\lambda$, as well as the $x$ and $z$ variables.
 
-The mapper computes the function 
+Given this form we construct the ADMM algorithm
+\begin{align*}
+x_i^{k+1} :=&\quad \min_x \sum_{j=1}^Nf(-A_jx\times b_j) + \dfrac{\rho^k}{2}\|x - z_i + u_i\|_2^2\\
+\\
+z_i^{k+1} :=&\quad \begin{cases}
+    x_0^{k+1} + u_0^k& \text{if $i=0$}\\
+    \\
+    \dfrac{m}{2\lambda}(x_i^{k+1} + u_i^k)& \text{otherwise}
+  \end{cases}\\
+\\
+u_i^{k+1} :=&\quad u_i^k + x_i^{k+1} + z_i^{k+1},
+\end{align*}
+where $f$ is defined as $f(x)=\log(1+\exp(-x))$, $m$ is the number of mappers (explained below), and the penalty parameter $\rho^k$, for iteration $k$, is used as the step size.
+
+Map Reduce tasks consist of three components: a mapper which applies a function to a set of values, a reducer which aggregates multiple values, and a driver which handles input arguments and coordinates execution of the mappers and reducers.  To apply ADMM to Map Reduce we use multiple mappers, each of which performs the resource intensive task of computing the current $x_i^{k+1}$.  After all mappers have completed their computations, we use a single reducer to compute the $z_i^{k+1}$ and $u_i^{k+1}$ updates.
+
+We also use the reducer to update the penalty parameter $\rho$.  The amount of iterations before convergence depends upon the $\rho$ parameter and hand-tuning the $\rho$ parameter can take a significant amount of time, because we must wait for a complete algorithm to complete.  By varying the penalty parameter we can reduce the performance impact of our initial choice of $\rho$, and avoid spending time hand-tuning $\rho$.  We use the update scheme suggested in \cite{boyd} to update $\rho$ on each iteration:
+\begin{equation}
+\rho^{k+1}:=\begin{cases}
+  \tau^{\text{incr}}\rho^k&\quad \text{if $\|r^k\|_2>\mu\|s^k\|_2$}\\
+  \rho^k/\tau^{\text{decr}}&\quad \text{if $\|s^k\|_2>\mu\|r^k\|_2$}\\
+  \rho^k&\quad \text{otherwise,}
+\end{cases}
+\end{equation}
+where $\mu>1$, $\tau^{\text{incr}}>1$, and $\tau^{\text{decr}}>1$ are parameters, where we used the typical values of $\mu=10$ and $\tau^{\text{incr}}=\tau^{\text{decr}}=2$.
+
+After having completed a mapper and reducer cycle, one iteration of the algorithm has finished and control returns to the driver.  In addition to initiating the mapper and reducer tasks, the ADMM driver determines if the algorithm has converged.  If it has not converged we distribute the $z_i$ and $u_i$ to the mappers and begin the next iteration, if it has converged we write the results to persistent storage (a bucket on Amazon S3) and exit.
 
 \subsection{Modeling Pipeline}
 
