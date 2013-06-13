@@ -169,8 +169,9 @@
 
 
 % *** MATH PACKAGES ***
-\usepackage{amssymb}%
-\usepackage{amsmath}%
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{url}
 \DeclareMathOperator*{\Min}{Min}
 %\usepackage[cmex10]{amsmath}
 % A popular package from the American Mathematical Society that provides
@@ -354,7 +355,7 @@
 %
 % paper title
 % can use linebreaks \\ within to get better formatting as desired
-\title{Generic Optimization at Scale with the Alternating Direction Method of Multipliers Algorithm}
+\title{Optimization at Scale with the\\ Alternating Direction Method of Multipliers Algorithm}
 
 
 % author names and affiliations
@@ -424,7 +425,11 @@ distributed algorithms; optimization; analytics models
 
 
 \section{Introduction}
-When modeling at scale the solution not only needs to function correctly, it needs to function on large amounts of data in a reasonable amount of time.  In this context, modeling is often approached in a two step process, the first step is to prototype a solution on a sample of the dataset, and the second step is to convert the solution to a form that is distributed and parallel.  Map Reduce is the most common programming model for working with large distributed data sets \cite{google-mr-paper} and Apache Hadoop \cite{hadoop} is the most popular implementation of Map Reduce.
+When modeling at scale the solution not only needs to function correctly, it needs to function on large amounts of data in a reasonable amount of time.  In this context, modeling is often approached in a two step process, the first step is to prototype a solution on a sample of the dataset, and the second step is to run it on a production scale dataset.  The normal production datasets we use cannot fit into the memory available on a single machine and we will need to distributed the dataset over a set of machines.
+
+Once distributing datasets we must use algorithms which can compute on distributed datasets.  The ADMM algorithm is a distributed convex optimization algorithm that allows us to fit logistic regression, lasso, $\l1$ and $\l2$ norm, support vector machine, and other popular models.
+
+Map Reduce is the most common programming model for working with large distributed data sets \cite{dean2004} and Apache Hadoop \cite{white2009} is the most popular implementation of Map Reduce.
 
 In our case, the model that we prototyped was of the form:
 \begin{equation}
@@ -460,7 +465,7 @@ where we have introduced the regularization factor $\lambda$, as well as the $x$
 
 Given this form we construct the ADMM algorithm:
 \begin{align*}
-x_i^{k+1} :=&\quad \min_x \sum_{j=1}^Nf(-A_jx\times b_j) + \dfrac{\rho^k}{2}\|x - z_i + u_i\|_2^2\\
+x_i^{k+1} :=&\quad \min_x \sum_{j=1}^Nf(A_jx\times b_j) + \dfrac{\rho^k}{2}\|x - z_i + u_i\|_2^2\\
 \\
 z_i^{k+1} :=&\quad \begin{cases}
     x_0^{k+1} + u_0^k& \text{if $i=0$}\\
@@ -470,7 +475,15 @@ z_i^{k+1} :=&\quad \begin{cases}
 \\
 u_i^{k+1} :=&\quad u_i^k + x_i^{k+1} + z_i^{k+1},
 \end{align*}
-where $f$ is defined as $f(x)=\log(1+\exp(-x))$, $m$ is the number of mappers (explained below), and $\rho^k$ is the penalty parameter for iteration $k$, which is used as the step size.
+where $f$ is the negative log of the logistic function:
+\begin{align*}
+f(\alpha)=&-\log(\text{logit}^{-1}(\alpha))\\
+=&-\log\left(\frac{1}{1+\exp(-\alpha)}\right)\\
+=&\log(1+\exp(-\alpha)),
+\end{align*}
+$m$ is the number of mappers (explained below), and $\rho^k$ is the penalty parameter for iteration $k$, which is used as the step size.
+
+To solve the minimization function in the $x_i$ update we use the quasi-Newton method of Broyden, Fletcher, Goldfarb, and Shanno---the BFGS method \cite{bonnans2003numerical}.  BFGS is a hill-climbing algorithm that approximates Newton's method and has proven good performance even for non-smooth functions.  We use a Java implementation of BFGS which is self contained and has performed well on Hadoop nodes.\footnote{\url{https://code.google.com/p/vladium/}}
 
 Map Reduce tasks consist of three components: mappers which apply a function to a set of values, reducers which aggregate multiple values, and a driver which handles input arguments and coordinates execution of the mappers and reducers.  To apply ADMM in the context of Map Reduce we use multiple mappers, each of which performs the resource intensive task of computing the current $x_i^{k+1}$.  After all mappers have completed their computations, we use a single reducer to compute the $z_i^{k+1}$ and $u_i^{k+1}$ updates.
 
@@ -486,21 +499,21 @@ where $\mu>1$, $\tau^{\text{incr}}>1$, and $\tau^{\text{decr}}>1$ are parameters
 
 After having completed a mapper and reducer cycle, one iteration of the algorithm has finished and control returns to the driver.  In addition to initiating the mapper and reducer tasks, the ADMM driver determines if the algorithm has converged.  If it has not converged we distribute the $z_i$ and $u_i$ to the mappers and begin the next iteration, if it has converged we write the results to persistent storage (a bucket on Amazon S3) and exit.
 
-\textbf{TODO} BFGS.
-
-Wherever feasible we have made the implementation of the ADMM algorithm generic.  Arguments to the driver allow users to exclude columns from the input data, add an intercept, set the initial $\rho$, maximum number of iterations, and of course the input and output locations. We have released an implementation of the ADMM algorithm for Hadoop as an open source Java package.\footnote{https://github.com/intentmedia/admm}.
+Wherever feasible we have made the implementation of the ADMM algorithm generic.  Arguments to the driver allow users to exclude columns from the input data, add an intercept, set the initial $\rho$, maximum number of iterations, and of course the input and output locations. We have released an implementation of the ADMM algorithm for Hadoop as an open source Java package.\footnote{\url{https://github.com/intentmedia/admm}}.
 
 \subsection{Modeling Workflow}
 The other steps in our modeling workflow are less algorithmically involved than computing logistic regression.
 
 \subsubsection{Data Aggregation}
-The data aggregation is n Extract, Transform, and Load (ETL) step.  In this step we join multiple data sources together and transform data in order to extract meaningful signals.  We use the data processing and query library Cascalog to perform our data aggregation step.  Using Cascalog we can fluently express the relationships between data sources and tightly integrate with existing our Java codebase.
+The data aggregation step performs an Extract, Transform, and Load (ETL) operation.  In this step we join multiple data sources together and transform data in order to extract meaningful signals.  We use the data processing and query library Cascalog\footnote{\url{http://cascalog.org/}} to perform our data aggregation step.  Using Cascalog we can fluently express the relationships between data sources and tightly integrate with existing our Java codebase.  The final result of the data aggregation step is a set of training and testing data which we will later use in linear and logistic regression.
 
 \subsubsection{Linear Regression}
-Linear regression can be exactly perform using matrix operations.  To perform these operations we require neither saved state nor iterations.  We use Pig in combination with matrix specific user defined functions to perform linear regression.
+We use matrix operations to exactly solve the linear regression equation.  To perform these operations we require neither saved state nor iterations.  Given this, we use Pig in combination with matrix specific user defined functions to perform linear regression.
 
 \section{Results}\label{sec:results}
-To evaluate the performance of the ADMM algorithm we ran it on test datasets of varying sizes.
+To evaluate the performance of the ADMM algorithm we ran it on a generated test dataset.  Figure \ref{fig:itertime} shows the difference between the predicted function and the actual function per iteration in the left panel, and the time per iteration in the right panel.  We see that the accuracy consistently improves and the run-time consistently decreases for later iterations.
+
+We additional test our ADMM implementation on a dataset that has been divided into subgroups in the worst possible way, the first group contains only positive examples and the second only negative examples.  Figure \ref{fig:itertime-wc} shows the same accuracy and time per iteration.  We see that this takes longer to converge, yet it shows the same pattern of increased accuracy and decreased time for each subsequent iteration.
 
 % An example of a floating figure using the graphicx package.
 % Note that \label must occur AFTER (or within) \caption.
@@ -585,10 +598,10 @@ To evaluate the performance of the ADMM algorithm we ran it on test datasets of 
 % command of the stfloats package.
 
 \section{Related Work}\label{sec:related}
-The related work goes here. this is more of the related work.
+The algorithm and our implementation are based upon \cite{boyd}, which introduced the ADMM algorithm.  \cite{bu2010} presents a more efficient approach to iterative computation in Hadoop with modifications to the core Hadoop that reduce the costs of transferring data.  
 
 \section{Conclusion}\label{sec:conc}
-The conclusion goes here. this is more of the conclusion
+We have presented our implementation of the ADMM algorithm for Hadoop Map Reduce.  Having an ADMM implementation allows us to more easily move our modeling ideas from prototype to production scale.  We showed a specific example of using the ADMM algorithm to build a logistic regression model, however ADMM is a general optimization algorithm that we can apply to other modeling problems.  Having a generic distributed optimization algorithm reduces the risk of experimenting with different models at scale.
 
 % conference papers do not normally have an appendix
 
@@ -616,21 +629,13 @@ The conclusion goes here. this is more of the conclusion
 % http://www.ctan.org/tex-archive/biblio/bibtex/contrib/doc/
 % The IEEEtran BibTeX style support page is at:
 % http://www.michaelshell.org/tex/ieeetran/bibtex/
-%\bibliographystyle{IEEEtran}
+\bibliographystyle{IEEEtran}
 % argument is your BibTeX string definitions and bibliography database(s)
-%\bibliography{IEEEabrv,../bib/paper}
+\bibliography{pld_js_im_ieee_big_data}
 %
 % <OR> manually copy in the resultant .bbl file
 % set second argument of \begin to the number of references
 % (used to reserve space for the reference number labels box)
-\begin{thebibliography}{1}
-
-\bibitem{IEEEhowto:kopka}
-S.~Boyd et al., \emph{Distributed Optimization and Statistical Learning via the Alternating Direction Method of Multipliers}, Foundatinos and Trendas in Machine Learning.\hskip 1em plus
-  0.5em minus 0.4em\relax NOW, 2010.
-
-\end{thebibliography}
-
 
 
 
