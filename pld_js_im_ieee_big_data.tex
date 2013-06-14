@@ -171,8 +171,11 @@
 % *** MATH PACKAGES ***
 \usepackage{amssymb}
 \usepackage{amsmath}
+\usepackage{xcolor}
 \usepackage{url}
-\DeclareMathOperator*{\Min}{Min}
+
+\newcommand{\todo}[1]{\texttt{\textcolor{red}{#1}}}
+
 %\usepackage[cmex10]{amsmath}
 % A popular package from the American Mathematical Society that provides
 % many useful and powerful commands for dealing with mathematics. If using
@@ -465,16 +468,17 @@ To compute this probability we fit a logistic regression model using ADMM.  We b
 where we have introduced the regularization factor $\lambda$, as well as the $x$ and $z$ variables.
 
 Given this form we construct the ADMM algorithm:
+\todo{do x,z,u get k superscripts?}
 \begin{align*}
-x_i^{k+1} :=&\quad \min_x \sum_{j=1}^Nf(A_jx\times b_j) + \dfrac{\rho^k}{2}\|x - z_i + u_i\|_2^2\\
+x_i^{k+1} :=&\quad \min_x \sum_{j=1}^Nf(A_ijx\times b_ij) + \dfrac{\rho^k}{2}\|x - z + u_i\|_2^2\\
 \\
-z_i^{k+1} :=&\quad \begin{cases}
+z^{k+1} :=&\quad \begin{cases}
     x_0^{k+1} + u_0^k& \text{if $i=0$}\\
     \\
     \dfrac{m}{2\lambda}(x_i^{k+1} + u_i^k)& \text{otherwise}
   \end{cases}\\
 \\
-u_i^{k+1} :=&\quad u_i^k + x_i^{k+1} + z_i^{k+1},
+u_i^{k+1} :=&\quad u_i^k + x_i^{k+1} + z^{k+1},
 \end{align*}
 where $f$ is the negative log of the logistic function:
 \begin{align*}
@@ -487,7 +491,16 @@ $m$ is the number of mappers (explained below), and $\rho^k$ is the penalty para
 To solve the minimization function in the $x_i$ update we use the quasi-Newton method of Broyden, Fletcher, Goldfarb, and Shanno---the BFGS method \cite{bonnans2003numerical}.  BFGS is a hill-climbing algorithm that approximates Newton's method and has proven good performance even for non-smooth functions.  We use a Java implementation of BFGS which is self contained and has performed well on Hadoop nodes.\footnote{\url{https://code.google.com/p/vladium/}}
 
 \subsection{ADMM within MapReduce}
-MapReduce tasks consist of three components: mappers which apply a function to a set of values, reducers which aggregate multiple values, and a driver which handles input arguments and coordinates execution of the mappers and reducers.  To apply ADMM in the context of MapReduce we use multiple mappers, each of which performs the resource intensive task of computing the current $x_i^{k+1}$.  After all mappers have completed their computations, we use a single reducer to compute the $z_i^{k+1}$ and $u_i^{k+1}$ updates.
+The MapReduce model divides into three phases: the map, the shuffle, and the reduce.  In the mapper phase the input data is split among a set of mappers and each mapper applies a function to the set of data assigned to it.  In the shuffle phase the output of the mappers is assigned to a reducer, and then in the reduce phase the mapper output is aggregated to create the final values.
+
+We may express the map and reduce steps the as:
+\begin{alignat*}{2}
+&\text{map}\quad &(k_1,v_2)\quad\rightarrow &\texttt{list}(k_2,v_2)\\
+&\text{reduce}\quad &(k_2,\texttt{list}(v_2))\quad\rightarrow &\texttt{list}(v_2),
+\end{alignat*}
+where each mapper has a unique key $k_1$.  The shuffle is concerned with mapping the intermediate key-value pairs, $(k_2,v_2)$, otuput by the mappers to the reducers \cite{dean2004}.
+
+To implement MapReduce in Hadoop we must define classes for the mapper, reducer, and a driver that handles input arguments and coordinates the execution of the mapper and reducer (the shuffle is handled by Hadoop).  In the context of ADMM each mapper performs the resource intensive task of computing the current $x_i^{k+1}$.  After all mappers have completed their computations, we use a single reducer to compute the $z_i^{k+1}$ and $u_i^{k+1}$ updates.
 
 We also use the reducer to update the penalty parameter $\rho$.  The number of iterations before convergence depends upon the $\rho$ parameter, and hand-tuning the $\rho$ parameter can take a significant amount of time.  We must wait for the algorithm to complete before determining the efficacy of the chosen $\rho$.  By varying the penalty parameter we can reduce the performance impact of our initial choice of $\rho$, and avoid spending time hand-tuning $\rho$.  We use the update scheme suggested in \cite{boyd} to update $\rho$ on each iteration:
 \begin{equation}
