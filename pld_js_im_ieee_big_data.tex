@@ -173,6 +173,7 @@
 \usepackage{amsmath}
 \usepackage{xcolor}
 \usepackage{url}
+\usepackage{algorithm2e}
 
 \newcommand{\todo}[1]{\texttt{\textcolor{red}{#1}}}
 
@@ -435,7 +436,7 @@ The MapReduce programming model \cite{dean2004} allows us to work with large dis
 
 When using distributed datasets we must use algorithms which can compute on distributed datasets.  The ADMM algorithm is a distributed convex optimization algorithm that allows us to fit logistic regression, lasso, $\l1$ and $\l2$ norm, support vector machine, and other popular models.  We can use without having to hand-tune parameters, which is especially time-consuming with long-running modeling jobs.
 
-The model that we prototyped predicted the estimated value $\hat{y}$ as the expectation of the target value $b$ given that this target value is greater than zero and there is a matrix of features $A$, multiplied by the probability that the target is greater than zero given the features.  We express this as:
+The model that we prototyped predicted the estimated value $\hat{y}$ as the expectation of the target value $b$ given that this target value is greater than zero and there is a matrix of features $\mathbf{A}$, multiplied by the probability that the target is greater than zero given the features.  We express this as:
 \begin{equation}
 \hat{y} = \mathbb{E}[b|b>0,\mathbf{A}]P(b>0|\mathbf{A}),
 \end{equation}
@@ -452,8 +453,8 @@ Here we describe exactly how we implemented ADMM for Hadoop MapReduce and provid
 
 \begin{figure}[!t]
 \centering
-\includegraphics[width=3.5in]{model_workflow_horizontal}
-\caption{Data transfer paths.  Training data is stored in S3, then loaded into HDFS.  On the final iteration the $\hat{y}$ values are output to S3.}
+\includegraphics[width=3.2in]{aws_implementation}
+\caption{The Job Runner sets paths for the input, the output data, the Jar file with ADMM, and any adjustable parameters; e.g. the number of iterations.  ADMM computes and stores intermediate data in HDFS, then after the final iteration, the $\hat{y}$ values are output to S3.}
 \label{workflow}
 \end{figure}
 
@@ -469,17 +470,19 @@ where we have introduced the regularization factor $\lambda$, as well as the $x$
 
 Given this form we construct the ADMM algorithm:
 \todo{do x,z,u get k superscripts?}
-\begin{align*}
+\begin{align}
+\label{eq:x}
 x_i^{k+1} :=&\quad \min_x \sum_{j=1}^Nf(A_ijx\times b_ij) + \dfrac{\rho^k}{2}\|x - z + u_i\|_2^2\\
-\\
+\label{eq:z}
 z^{k+1} :=&\quad \begin{cases}
     x_0^{k+1} + u_0^k& \text{if $i=0$}\\
     \\
     \dfrac{m}{2\lambda}(x_i^{k+1} + u_i^k)& \text{otherwise}
   \end{cases}\\
-\\
+\nonumber\\
+\label{eq:u}
 u_i^{k+1} :=&\quad u_i^k + x_i^{k+1} + z^{k+1},
-\end{align*}
+\end{align}
 where $f$ is the negative log of the logistic function:
 \begin{align*}
 f(\alpha)=&-\log(\text{logit}^{-1}(\alpha))\\
@@ -500,24 +503,57 @@ We may express the map and reduce steps the as:
 \end{alignat*}
 where each mapper has a unique key $k_1$.  The shuffle is concerned with mapping the intermediate key-value pairs, $(k_2,v_2)$, otuput by the mappers to the reducers \cite{dean2004}.
 
-To implement MapReduce in Hadoop we must define classes for the mapper, reducer, and a driver that handles input arguments and coordinates the execution of the mapper and reducer (the shuffle is handled by Hadoop).  In the context of ADMM each mapper performs the resource intensive task of computing the current $x_i^{k+1}$.  After all mappers have completed their computations, we use a single reducer to compute the $z_i^{k+1}$ and $u_i^{k+1}$ updates.
+To implement MapReduce in Hadoop we must define classes for the mapper, reducer, and a driver that handles input arguments and coordinates the execution of the mapper and reducer (the shuffle is handled by Hadoop).  In the context of ADMM each mapper performs the resource intensive task of computing the current $x_i$.  After all mappers have completed their computations, we use a single reducer to compute the $z_i$ and $u_i$ updates.
 
-We also use the reducer to update the penalty parameter $\rho$.  The number of iterations before convergence depends upon the $\rho$ parameter, and hand-tuning the $\rho$ parameter can take a significant amount of time.  We must wait for the algorithm to complete before determining the efficacy of the chosen $\rho$.  By varying the penalty parameter we can reduce the performance impact of our initial choice of $\rho$, and avoid spending time hand-tuning $\rho$.  We use the update scheme suggested in \cite{boyd} to update $\rho$ on each iteration:
+\subsubsection{Peristent Data with Input Splits}
+In the ADMM algorithm, when each mapper calculates the $x_i^{k+1}$ values on iteration $k+1$, it must use the $u_i^k$ values that were calculated for the same mapper in the previous iteration $k$.  Hadoop does not normally accommodate this sort of persistence.  \cite{boyd} suggest using Apache HBase, a distributed data store, however this would add a new component and its accompanying complexity to the modeling framework.
+
+As an alternative, we use Hadoop's notion of input splits to keep track of where data is stored and associated the correct $x_i$ and $u_i$ values with each other.  Input splits specify a \em{split length} and a \em{split ID}, which determine the size of the split data and the node on which to execute the split, respectively.  To ensure that the correct $u_i$ values are loaded when calculating an $x_i$ value, the mapper reads the split ID and chooses the $u_i$ values based on this split ID.  The $z$ values are the same in each $x_i$ formula, i.e. across mappers, to handle this we simply replicate the current $z$ values across all mappers at the start of each iteration.
+
+\subsubsection{Automatically Updating $\rho$}
+
+We use the reducer to update the penalty parameter $\rho$.  The number of iterations before convergence depends upon the $\rho$ parameter, and hand-tuning the $\rho$ parameter can take a significant amount of time.  We must wait for the algorithm to complete before determining the efficacy of the chosen $\rho$.  By varying the penalty parameter we can reduce the performance impact of our initial choice of $\rho$, and avoid spending time hand-tuning $\rho$.  We use the update scheme suggested in \cite{boyd} to update $\rho$ on each iteration:
 \begin{equation}
 \rho^{k+1}:=\begin{cases}
   \tau^{\text{incr}}\rho^k&\quad \text{if $\|r^k\|_2>\mu\|s^k\|_2$}\\
   \rho^k/\tau^{\text{decr}}&\quad \text{if $\|s^k\|_2>\mu\|r^k\|_2$}\\
   \rho^k&\quad \text{otherwise,}
 \end{cases}
+\label{eq:r}
 \end{equation}
-where $\mu>1$, $\tau^{\text{incr}}>1$, and $\tau^{\text{decr}}>1$ are parameters, and we have used the typical values of $\mu=10$ and $\tau^{\text{incr}}=\tau^{\text{decr}}=2$.
+where $\mu>1$, $\tau^{\text{incr}}>1$, and $\tau^{\text{decr}}>1$ are parameters.  We have used the typical values of $\mu=10$ and $\tau^{\text{incr}}=\tau^{\text{decr}}=2$.
 
-After having completed a mapper and reducer cycle, one iteration of the algorithm has finished and control returns to the driver.  In addition to initiating the mapper and reducer tasks, the ADMM driver determines if the algorithm has converged.  If it has not converged we distribute the $z_i$ and $u_i$ to the mappers and begin the next iteration, if it has converged we write the results to persistent storage (a bucket on Amazon S3) and exit.
+\subsubsection{ADMM Algorithm for MapReduce}
+After having completed a mapper and reducer cycle, we will have one iteration of the algorithm has finished and control returns to the driver.  In addition to initiating the mapper and reducer tasks, the ADMM driver determines if the algorithm has converged.  If it has not converged we distribute the $z$ and $u_i$ to the mappers and begin the next iteration, if it has converged we write the results to persistent storage (a bucket on Amazon S3) and exit.  This is shown in Algorithm \ref{alg:admm} below.
+
+\begin{algorithm}
+\SetAlgoLined
+\KwData{feature matrix $\mathbf{A}$ and vector of target values $b$}
+\KwResult{a vector of weights $z$}
+$k=0$\\
+$m=\text{[the number of mapper nodes]}$\\
+\While{$k<\text{maxIterations}$ and $\text{curSt} > \text{preSt}$}{
+  \For{$i=1\to m$}{
+    update $x_i^k$ using Eq. \ref{eq:x}\\
+   update $u_i^k$ using Eq. \ref{eq:u}\\
+    $i \gets i + 1$
+  }
+  update $z^k$ using Eq. \ref{eq:z}\\
+  update $\rho^k$ using Eq. \ref{eq:r}\\
+  $k \gets k + 1$
+}
+write $z^k$ to S3.
+\label{alg:admm}
+\vspace{1em}
+\caption{ADMM algorithm implemented for Hadoop MapReduce.}
+\end{algorithm}
+
+The data that is used in the algorithm is stored in Amazon's simple storage service, Amazon S3.  To reduce the network latency involved in transferring data from Amazon S3 to MapReduce nodes, we store the data---feature matrix $\mathbf{A}$ and target values $b$---in the nodes' local HDFS file systems.  We use Amazon's Elastic Map Reduce (EMR) service to execute Hadoop, this allows us to avoid any data transfer fees.
 
 Wherever feasible we have made the implementation of the ADMM algorithm generic.  Arguments to the driver allow users to exclude columns from the input data, add an intercept, set the initial $\rho$, maximum number of iterations, and of course the input and output locations. We have released an implementation of the ADMM algorithm for Hadoop as an open source Java package.\footnote{\url{https://github.com/intentmedia/admm}}.
 
 \section{Results}\label{sec:results}
-To evaluate the performance of the ADMM algorithm we ran it on a generated test dataset.  Figure \ref{fig:itertime} pacman -Qqo /bin /sbin /usr/sbin | pacman -Qm -shows the difference between the predicted function and the actual function per iteration in the left panel, and the time per iteration in the right panel.  We see that the accuracy consistently improves and the run-time consistently decreases for later iterations.
+To evaluate the performance of the ADMM algorithm we ran it on a generated test dataset.  Figure \ref{fig:itertime} shows the difference between the predicted function and the actual function per iteration in the left panel, and the time per iteration in the right panel.  We see that the accuracy consistently improves and the run-time consistently decreases for later iterations.
 
 We additional test our ADMM implementation on a dataset that has been divided into subgroups in the worst possible way, the first group contains only positive examples and the second only negative examples.  Figure \ref{fig:itertime-wc} shows the same accuracy and time per iteration.  We see that this takes longer to converge, yet it shows the same pattern of increased accuracy and decreased time for each subsequent iteration.
 
