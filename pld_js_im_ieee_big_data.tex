@@ -215,13 +215,13 @@ Here we describe exactly how we implemented ADMM for Hadoop MapReduce and provid
 \end{figure}
 
 \subsection{Logistic Regression with ADMM}
-Given a matrix of features $\mathbf{A}\in\mathbf{R}^{n\times m}$ and a vector of their labels $b\in\mathbf{R}^n$ with $b_i\in\{-1,1\}$, our goal is to compute the probability $\text{Pr}(b_i=1|\mathbf{A}_i)$ for each row $1\leq i\leq n$.  The first column of the feature matrix represents the intercept and all values in this column are set to 1.
+Given a matrix of features $\mathbf{A}\in\mathbf{R}^{m\times n}$ and a vector of their labels $b\in\mathbf{R}^m$ with $b_i\in\{-1,1\}$, our goal is to compute the probability $\text{Pr}(b_i=1|\mathbf{A}_i)$ for each row $1\leq i\leq m$.  The first column of the feature matrix represents the intercept and all values in this column are set to 1.
 
 In general, the convex model fitting problem with regularization can be written as:
 \begin{align*}
 \text{minimize}&\quad \sum_{i=1}^m l_i(\mathbf{A}_i^Tx - b_i) + r(x)
 \end{align*}
-where $l_i$ is the loss for example $i$, $r$ is a regularization term, and $x\in\mathbf{R}^m$ is the vector that solves the optimization problem and defines the logistic regression model.
+where $l_i$ is the loss for example $i$, $r$ is a regularization term, and $x\in\mathbf{R}^n$ is the vector that solves the optimization problem and defines the logistic regression model.
 
 In the case of L2 regularized logistic regression the problem becomes:
 \begin{align*}
@@ -235,7 +235,7 @@ Rephrasing the problem in ADMM global consensus form and reflecting the fact tha
 &+\sum_{i_N=1}^{m_N} log(-b_{i_N}\mathbf{A}_{i_N}^Tx_{_N})+\lambda\|z\|_2^2\\
 \text{subject to}&\quad x_{_j} - z = 0, j = 1, \ldots, N
 \end{align*}
-where $x_{_j}\in\mathbf{R}^m$ is the logistic regression fit on machine $j$ and $z\in\mathbf{R}^m$ is a variable representing the global consensus.  After running the algorithm, $z$ will be taken as the vector of parameters that defines the model. The constraint enforces equality of the parameter estimates across machines.
+where $x_{_j}\in\mathbf{R}^n$ is the logistic regression fit on machine $j$ and $z\in\mathbf{R}^n$ is a variable representing the global consensus.  After running the algorithm, $z$ will be taken as the vector of parameters that defines the model. The constraint enforces equality of the parameter estimates across machines.
 
 The ADMM algorithm for this problem is:
 \begin{align}
@@ -243,18 +243,18 @@ The ADMM algorithm for this problem is:
 x_{_j}^{k+1} :=&\quad \argmin_{x_{_j}} \sum_{i_j=1}^{m_j} log(-b_{i_j}\mathbf{A}_{i_j}^Tx_{_j}) + \dfrac{\rho^k}{2}\|x_{_j} - z^k + u_{_j}^k\|_2^2\\
 \label{eq:z}
 z^{k+1} :=&\quad \begin{cases}
-    \bar{x}_m^{k+1} + \bar{u}_m^k& \text{if $m=1$}\\
+    \bar{x}_q^{k+1} + \bar{u}_q^k& \text{if $q=1$}\\
     \\
-    \dfrac{N}{2\lambda}(\bar{x}_m^{k+1} + \bar{u}_m^k)& \text{otherwise}
+    \dfrac{N\rho}{2\lambda + N\rho}(\bar{x}_q^{k+1} + \bar{u}_q^k)& \text{otherwise}
   \end{cases}\\
 \nonumber\\
 \label{eq:u}
 u_i^{k+1} :=&\quad u_i^k + x_i^{k+1} + z^{k+1},
 \end{align}
 
-Where $\bar{x}_m$ represents average across all mappers of the $m$th element of the vector $\bar{x}\in\mathbf{R}^m$, or in other words, $\bar{x}_m = \sum_{j=1}^m x_{m_j}$.  $x_1$ corresponds to the intercept and is not regularize so we treat it differently from the other values in the vector.  $k$ is the iteration number, and $\rho^k$ is the penalty parameter for iteration $k$, which is used as the step size.
+Where $\bar{x}_q$ represents average across all mappers of the $q$th element of the vector $\bar{x}\in\mathbf{R}^n$, or in other words, $\bar{x}_q = \sum_{j=1}^N x_{q_j}$.  $x_1$ corresponds to the intercept and is not regularize so we treat it differently from the other values in the vector.  $k$ is the iteration number, and $\rho^k$ is the penalty parameter for iteration $k$, which is used as the step size.
 
-For each mapper $n_j$, $\mathbf{A_i}$ and $b_i$ are the portion of the data assigned to and used in that mapper.  The values of the $x_{_j}$ are calculated in parallel on the mappers while the values of $z$ and $u$ are calculated on the reducer.
+For each mapper $j$, $\mathbf{A_{i_j}}$ and $b_{i_j}$ are the portion of the data assigned to and used in that mapper.  The values of the $x_{_j}$ are calculated in parallel on the mappers while the values of $z$ and $u$ are calculated on the reducer.
 
 The convex minimization problem for each $x_{_j}$ update is solved using the L-BFGS (low-memory BFGS) method \cite{bonnans2003numerical}.  We use a Java implementation of L-BFGS which is self contained and has performed well on Hadoop nodes.\footnote{\url{https://code.google.com/p/vladium/}}
 
@@ -300,12 +300,12 @@ After having completed a mapper and reducer cycle,  the algorithm will have comp
 $k=0$\\
 $m=\text{[the number of mapper nodes]}$\\
 \While{$k<\text{maxIterations}$ and $\text{curSt} > \text{preSt}$}{
-  \For{$i=1\to m$}{
+  \For{$i=1\to N$}{
     update $x_{_j}^k$ using Eq. \ref{eq:x}\\
     $i \gets i + 1$
   }
   update $z^k$ using Eq. \ref{eq:z}\\
-  \For{$i=1\to m$}{
+  \For{$i=1\to N$}{
      update $u_{_j}^k$ using Eq. \ref{eq:u}\\
     $i \gets i + 1$
   }
