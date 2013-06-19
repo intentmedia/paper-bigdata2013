@@ -215,16 +215,17 @@ Here we describe exactly how we implemented ADMM for Hadoop MapReduce and provid
 \end{figure}
 
 \subsection{Logistic Regression with ADMM}
-Given a matrix of features $\mathbf{A}\in\mathbf{R}^{n\times m}$ and a vector of their labels $b\in\mathbf{R}^n$ with $b_i\in\{-1,1\}$, our goal is to compute the probability $\text{Pr}(B_i=b_i|\mathbf{A}_i)$ for each row $0<i\leq n$.
+Given a matrix of features $\mathbf{A}\in\mathbf{R}^{n\times m}$ and a vector of their labels $b\in\mathbf{R}^n$ with $b_i\in\{-1,1\}$, our goal is to compute the probability $\text{Pr}(B_i=b_i|\mathbf{A}_i)$ for each row $0<i\leq n$.  We designate the 0th column of the feature matrix as the intercept column by setting it to unity, i.e. $\forall i(\mathbf{A}_{i0}=1)$.
 
-To compute this probability we use ADMM to fit a logistic regression model using ADMM.  We begin by expressing the logistic regression problem in ADMM form as:
+To compute the above probability we use ADMM to fit a logistic regression model using ADMM.  We begin by expressing the logistic regression problem in ADMM form as:
 \begin{align*}
 \text{minimize}&\quad (1/2)\|\mathbf{A}x-b\|_2^2+\lambda\|z\|_1\\
 \text{subject to}&\quad Fx-z=0,
 \end{align*}
-where we have introduced the regularization factor $\lambda$, the $x$ and $z$ variables, and the matrix of second differences $F$.
+where we have introduced the regularization factor $\lambda$, the $x$ and $z$ variables, and the matrix of second differences $F$. \todo{Describe F in more detail, check the above formula in general.}
 
 Given this form we construct the ADMM algorithm:
+\todo{In \ref{eq:u}, the indices are into x not m!}\\
 \begin{align}
 \label{eq:x}
 x_i^{k+1} :=&\quad \min_{x_i} \sum_{j=1}^Nl(\mathbf{A}_{ij}x_i\times b_{ij}) + \dfrac{\rho^k}{2}\|x_i - z^k + u_i^k\|_2^2\\
@@ -232,7 +233,7 @@ x_i^{k+1} :=&\quad \min_{x_i} \sum_{j=1}^Nl(\mathbf{A}_{ij}x_i\times b_{ij}) + \
 z^{k+1} :=&\quad \begin{cases}
     x_0^{k+1} + u_0^k& \text{if $i=0$}\\
     \\
-    \dfrac{m}{2\lambda}(x_i^{k+1} + u_i^k)& \text{otherwise}
+    \dfrac{m}{2\lambda}(\bar{x}^{k+1} + \bar{u}^k)& \text{otherwise}
   \end{cases}\\
 \nonumber\\
 \label{eq:u}
@@ -242,7 +243,7 @@ where $l$ is the logistic loss function with $\ell1$ regularization,
 \begin{equation*}
 l(\alpha)=\log(1+\exp(-\alpha)),
 \end{equation*}
-$m$ is the number of mappers (explained below), and $\rho^k$ is the penalty parameter for iteration $k$, which is used as the step size. \todo{$\mathbf{A_i}$ and $b_i$ are the portion of the data used in mapper $m_i$.}
+$m$ is the number of mappers, and $\rho^k$ is the penalty parameter for iteration $k$, which is used as the step size. For each mapper $m_i$, $\mathbf{A_i}$ and $b_i$ are the portion of the data assigned to and used in that mapper.
 
 To solve the minimization function in the $x_i$ update we use the quasi-Newton method of Broyden, Fletcher, Goldfarb, and Shanno---the BFGS method \cite{bonnans2003numerical}.  BFGS is a hill-climbing algorithm that approximates Newton's method and has proven good performance even for non-smooth functions.  We use a Java implementation of BFGS which is self contained and has performed well on Hadoop nodes.\footnote{\url{https://code.google.com/p/vladium/}}
 
@@ -311,7 +312,9 @@ The input data that is used in the algorithm is stored in Amazon S3.  To reduce 
 Wherever feasible we have made the implementation of the ADMM algorithm generic.  Arguments to the driver allow users to exclude columns from the input data, add an intercept, set the initial $\rho$, maximum number of iterations, and the input and output locations. We have released an implementation of the ADMM algorithm for Hadoop as an open source Java package.\footnote{\url{https://github.com/intentmedia/admm}}
 
 \section{Results}\label{sec:results}
-We run the ADMM algorithm daily on nearly a terabyte of data.  To evaluate the performance we will examine the iterative output of one day's run.  Figure \ref{fig:iter} shows the difference between the predicted function and the actual function per iteration in the left panel, and the time per iteration in the right panel.  We see that the accuracy consistently improves and the run-time consistently decreases for later iterations.
+We run the ADMM algorithm daily on nearly a terabyte of data.  As depicted in Figure \ref{fig:workflow}, we load data stored in Amazon S3 and a Jar file containing the ADMM algorithm into Amazon EMR instances.  To evaluate the performance we examine the output of one day's run, looking at the change in loss function per iteration.  We examined equivalent results from other days and saw that the results do not vary substantially from day to day.
+
+Figure \ref{fig:iter} shows the difference between the predicted values and the actual values per iteration on a logarithmic scales.  We see that the loss decreases over iterations, and therefore that the accuracy consistently improves as a function of iterations.  The steep decline at iteration 8 aligns with a substantial increase in the dual residual (not shown).  \todo{The dual residual represents the [...].} After iteration 8 we see an exponential decay in loss function for the subsequent iterations.
 
 \begin{figure}[!t]
 \centering
@@ -323,7 +326,7 @@ We run the ADMM algorithm daily on nearly a terabyte of data.  To evaluate the p
 \section{Related Work}\label{sec:related}
 The algorithm and our implementation are based upon \cite{boyd}, which introduced the ADMM algorithm.  \cite{bu2010} presents a more efficient approach to iterative computation in Hadoop with modifications to the core Hadoop that reduce the costs of transferring data.  This is not the approach we took, we decided to stay within the Hadoop ecosystem and avoid the costs associated with a less well known solution.  Based on our experience MapReduce is "good enough", in the sense of the reduction in implementation costs outweigh potential performance improvements \cite{lin2012}, for ADMM and logistic regression. \cite{planet} presents a MapReduce implementation of tree ensemble learning and involves writer a wrapper to MapReduce that coordinates iterations of the underlying algorithm.
 
-Mahout and why we didn't use it.  
+Apache Mahout contains an implementation of logistic regression that uses stochastic gradient descent (SGD).\footnote{https://cwiki.apache.org/MAHOUT/logistic-regression.html}  As noted in \cite{agarwal2011} SGD this implementation is sequential, which substantially limits the performance of the algorithm and will make it difficult to scale.  \cite{agarwal2011} presents a scalable convex loss system that uses a Hadoop compatible variant of MapReduce.
 
 \section{Conclusion}\label{sec:conc}
 We have presented our implementation of the ADMM algorithm for Hadoop MapReduce.  Having an ADMM implementation allows us to more easily move our modeling ideas from prototype to production scale.  We showed a specific example of using the ADMM algorithm to build a logistic regression model, however ADMM is a general optimization algorithm that we can apply to other modeling problems.  Having a generic distributed optimization algorithm reduces the risk of experimenting with different models at scale.
