@@ -135,7 +135,7 @@
 %
 % paper title
 % can use linebreaks \\ within to get better formatting as desired
-\title{Optimization at Scale with the\\ Alternating Direction Method of Multipliers Algorithm}
+\title{Optimization at Scale using the\\ Alternating Direction Method of Multipliers Algorithm}
 
 
 % author names and affiliations
@@ -164,7 +164,7 @@ New York, USA\\
 
 
 \begin{abstract}
-We implement the Alternating Direction Method of Multipliers (ADMM) algorithm in Apache Hadoop MapReduce and describe how we use the ADMM algorithm to compute logistic regression as a subcomponent in a larger modeling pipeline.  We present a distributed logistic regression algorithm and implementation that performs well without parameter tuning.  We describe practical lessons learned in implementing an open source ADMM MapReduce algorithm.  Furthermore, we describe the advantages to staying implementing an iterative algorithm for Hadoop and remaining within the Hadoop ecosystem.
+We implement the Alternating Direction Method of Multipliers (ADMM) algorithm in Apache Hadoop MapReduce.   We then describe details of using the ADMM algorithm to fit a logistic regression model as a subcomponent in a larger modeling pipeline.  We present results of running a distributed logistic regression algorithm and show that it performs well without parameter tuning.  Throughout we emphasize the practical lessons learned while implementing an iterative MapReduce algorithm and the advantages of remaining within the Hadoop ecosystem.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -185,24 +185,28 @@ distributed algorithms; optimization; analytics models
 
 
 \section{Introduction}
-When modeling at scale the solution not only needs to function correctly, it needs to function on large amounts of data in a reasonable amount of time.  In this context, modeling is often approached in a two step process, the first step is to prototype a solution on a sample of the dataset, and the second step is to run it on a production scale dataset.  In many cases production datasets do not fit into the memory available on a single machine and we need to distribute the dataset over a set of machines.
+When modeling at scale, the algorithms not only need to function correctly, they need to function on large amounts of data in a practical amount of time.  In this context, we approach modeling in a two step process, the first step is to prototype a model on a sample of the dataset, after validating that the model works on this sample, the second step is to run the model on a production-scale dataset.  In many cases production-scale datasets do not fit into the memory available on a single machine and we need to distribute the dataset over a cluster of machines.
 
-The MapReduce programming model \cite{dean2004} allows us to work with large distributed datasets using commodity machines.  We use the Apache Hadoop \cite{white2009} implementation of MapReduce which is well known, widely used, and supported by many cloud computing providers.  We provide details of implementing an efficient iterative algorithm in Hadoop and how to overcome the challenges of network latency when transferring large amounts of data between clusters within the Amazon ecosystem. 
+The MapReduce programming model \cite{dean2004} allows clients to run computations on large distributed datasets with commodity machines.  Apache Hadoop is a well known, widely used, and broadly supported MapReduce platform which works with the Hadoop Distributed File System (HDFS)  and supports arbitrarily large datasets \cite{white2009}.  We choose to implement the ADMM algorithm using Hadoop in order to benefit from the wealth of existing Hadoop utilities and the community's extensive knowledge.
 
-When using distributed datasets we must use algorithms that can compute on distributed datasets.  Our algorithms must be able to compute a partial solution on a subset of the data and then later combine these partial solutions to produce a complete solution.  The ADMM algorithm is a distributed convex optimization algorithm that allows us to fit logistic regression, lasso, $\ell1$ and $\ell2$ norm, support vector machine, and other popular models.  We can use it without having to hand-tune parameters, which is especially time-consuming when executing long-running modeling jobs.
+Regardless of the problems concerning Hadoop's support for iteration \cite{bu2010}, we show that Hadoop can be used to implement an efficient iterative algorithm which is ``good enough'' in the sense of \cite{lin2012}.  That is to say, the benefits of using a reliable platform that easily integrates with our existing toolset outweigh the small increase in time per job.  To support iteration within Hadoop, we write data from external storage to HDFS, this reduces network latency when transferring large amounts of data.  We also use Hadoop's \emph{Input Splits} to persistently partition data between mappers over multiple iterations. 
 
-The model that we prototyped predicted the estimated value $\hat{y}$ as the expectation of the target value $b$ given that this target value is greater than zero and there is a matrix of features $\mathbf{A}$, multiplied by the probability that the target is greater than zero given the features.  We express this as:
+To efficiently run algorithms on distributed datasets we must use algorithms that can be parallelized.  Our algorithms must be able to compute a partial solution on a subset of the data and then later combine these partial solutions to produce a complete solution.  The ADMM algorithm is a distributed convex optimization algorithm that allows us to fit logistic regression, lasso, L1 and L2 norm, support vector machine, and other popular models.  When executing long-running modeling jobs hand-tuning paramters can be especially time-consuming.  To avoid this, we use ADMM with methods that automatically tune parameters while still guaranteeing convergence.
+
+The model that we prototyped predicted the estimated value $\hat{y}$ as the product of a conditional expectation and a conditional probability:
 \begin{equation}
-\hat{y} = \mathbb{E}[b|b>0,\mathbf{A}]\Pr(b>0|\mathbf{A}),
+\hat{y} = \mathbb{E}[b|b>0,\mathbf{A}]\Pr(b>0|\mathbf{A}).
 \label{eq:formula}
 \end{equation}
-where we fit the expectation, $\mathbb{E}[b|b>0,\mathbf{A}]$, using linear regression and we fit the conditional probability, $\Pr(b>0|\mathbf{A})$, using logistic regression.  This model performed quite well in prototyping, and the next step was to test it on a production scale dataset.  Fitting a linear regression model is possible using an analytic method, therefore we use matrix algebra to compute the analytic solution and predict the expectation in Equation \ref{eq:formula}.
+We fit the expectation, $\mathbb{E}[b|b>0,\mathbf{A}]$, using linear regression and we fit the conditional probability, $\Pr(b>0|\mathbf{A})$, using logistic regression.  This model performed quite well in prototyping, and the next step was to test it on a production-scale dataset.  Fitting a linear regression model is possible using an analytic method, therefore we use matrix algebra to compute the analytic solution and solve for the expectation in Equation \ref{eq:formula}.
 
-However, there is no analytic solution for logistic regression.  To fit the logistic regression model we must use an approximate method.  Many of the approximate methods traditionally used to fit logistic regression require access to the entirety of the training dataset at once, i.e. they require that the training dataset can be fit into memory.  These methods require that memory scale with the size of the dataset, and they cannot be distributed.
+However, there is no analytic solution for logistic regression, we must fit the logistic regression model using an approximate method.  Many of the approximate methods traditionally used to fit logistic regression require access to the entirety of the training dataset at once, i.e. they require that the training dataset can be fit into memory.  This require that memory scale with the size of the dataset, and they often cannot be run in parallel.
 
-The ADMM algorithm does not have this property.  The ADMM algorithm is an optimization algorithm suitable for convex optimization which can be used to compute logistic regression on subdivided portions of the training data and then combine the calculations on each portion to find a global solution \cite{boyd}.  Because of this the ADMM algorithm is amenable to the MapReduce programming model which distributes computations to multiple nodes.  On each iteration the ADMM algorithm optimizes the objective function for each portion of training data and then aggregates these predictions to find the global solution.  This is the algorithm we will use to fit a logistic regression model and predict the probability in Equation \ref{eq:formula}.
+The ADMM algorithm does not have this property.  The ADMM algorithm is an optimization algorithm suitable for convex optimization, which can be used to compute logistic regression in distributed and parallel manner.   ADMM computes the solution to an intermediate computationally intensive problem on subdivided portions of the training data and then combines these intermediate solutions to find the final solution \cite{boyd}.
 
-The rest of the paper is organized as follows.  In section \ref{sec:imp} we provide details concerning our implementation of the ADMM algorithm, its application to logistic regression, and how to implement it in Hadoop MapReduce.  In section \ref{sec:results} we present the results of running ADMM on a production scale datasets, which includes the improvement in the objective function.  In section \ref{sec:related} we review recent work related to iterative optimization with Hadoop, and in section \ref{sec:conc} we conclude.
+The intermediate solutions can be computed in parallel on multiple nodes, this makes the ADMM algorithm amenable to the MapReduce programming model.  On each iteration the ADMM algorithm optimizes the objective function in the parallel distributed fashion described above.  Although the iterations must be run sequentially, the time-consuming computation during each iteration can be parallelized.  This is opposed to other methods where the computation on each iteration is also sequential.  Because of its scalability, we use the ADMM algorithm to fit a logistic regression model and predict the probability in Equation \ref{eq:formula}.
+
+The rest of the paper is organized as follows.  In section \ref{sec:imp} we provide details concerning our implementation of the ADMM algorithm, its application to logistic regression, and how to implement it in Hadoop MapReduce.  In section \ref{sec:results} we present the results of running ADMM on a production scale dataset.  In section \ref{sec:related} we review recent work related to iterative optimization with Hadoop, and in section \ref{sec:conc} we conclude.
 
 \section{Implementation}\label{sec:imp}
 Here we describe exactly how we implemented ADMM for Hadoop MapReduce and provide practical details relevant to using it to build models in a production environment.
@@ -219,28 +223,28 @@ Given a matrix of features $\mathbf{A}\in\mathbf{R}^{m\times n}$ and a vector of
 
 In general, the convex model fitting problem with regularization can be written as:
 \begin{align*}
-\text{minimize}&\quad \sum_{i=1}^m l_i(\mathbf{A}_i^Tx - b_i) + r(x)
+\text{minimize}&\quad \sum_{i=1}^m l_i(\mathbf{A}_i^Tx - b_i) + r(x),
 \end{align*}
 where $l_i$ is the loss for example $i$, $r$ is a regularization term, and $x\in\mathbf{R}^n$ is the vector that solves the optimization problem and defines the logistic regression model.
 
 In the case of L2 regularized logistic regression the problem becomes:
 \begin{align*}
-\text{minimize}&\quad \sum_{i=1}^m log(-b_i\mathbf{A}_i^Tx) + \lambda\|x\|_2^2
+\text{minimize}&\quad \sum_{i=1}^m \log(-b_i\mathbf{A}_i^Tx) + \lambda\|x\|_2^2,
 \end{align*}
-where $\lambda$ is the regularization factor.
+where $\lambda$ is the regularization factor.2‎
 
-Rephrasing the problem in ADMM global consensus form and reflecting the fact that the training examples are partitioned across $N$ machines in the cluster:
+Rephrasing in ADMM global consensus form and reflecting the fact that the training examples are partitioned across $N$ machines in the cluster, the problem becomes:
 \begin{align*}
-\text{minimize}&\quad \sum_{i_1=1}^{m_1} log(-b_{i_1}\mathbf{A}_{i_1}^Tx_{_1})+\ldots \\
-&+\sum_{i_N=1}^{m_N} log(-b_{i_N}\mathbf{A}_{i_N}^Tx_{_N})+\lambda\|z\|_2^2\\
+\text{minimize}&\quad \sum_{i_1=1}^{m_1} \log(-b_{i_1}\mathbf{A}_{i_1}^Tx_{_1})+\ldots \\
+&\quad+\sum_{i_N=1}^{m_N} \log(-b_{i_N}\mathbf{A}_{i_N}^Tx_{_N})+\lambda\|z\|_2^2\\
 \text{subject to}&\quad x_{_j} - z = 0, j = 1, \ldots, N
 \end{align*}
-where $x_{_j}\in\mathbf{R}^n$ is the logistic regression fit on machine $j$ and $z\in\mathbf{R}^n$ is a variable representing the global consensus.  After running the algorithm, $z$ will be taken as the vector of parameters that defines the model. The constraint enforces equality of the parameter estimates across machines.
+where $x_{_j}\in\mathbf{R}^n$ is the logistic regression fit on machine $j$ and $z\in\mathbf{R}^n$ is a variable representing the global consensus.  After running the algorithm, $z$ will be a vector of parameters that defines the model. The constraint enforces equality of the parameter estimates across machines.
 
-The ADMM algorithm for this problem is:
+The ADMM algorithm for the above problem is:
 \begin{align}
 \label{eq:x}
-x_{_j}^{k+1} :=&\quad \argmin_{x_{_j}} \sum_{i_j=1}^{m_j} log(-b_{i_j}\mathbf{A}_{i_j}^Tx_{_j}) + \dfrac{\rho^k}{2}\|x_{_j} - z^k + u_{_j}^k\|_2^2\\
+x_{_j}^{k+1} :=&\quad \argmin_{x_{_j}} \sum_{i_j=1}^{m_j} \log(-b_{i_j}\mathbf{A}_{i_j}^Tx_{_j})+ \dfrac{\rho^k}{2}\|x_{_j} - z^k + u_{_j}^k\|_2^2\\
 \label{eq:z}
 z^{k+1} :=&\quad \begin{cases}
     \bar{x}_q^{k+1} + \bar{u}_q^k& \text{if $q=1$}\\
@@ -251,8 +255,7 @@ z^{k+1} :=&\quad \begin{cases}
 \label{eq:u}
 u_i^{k+1} :=&\quad u_i^k + x_i^{k+1} + z^{k+1},
 \end{align}
-
-Where $\bar{x}_q$ represents average across all mappers of the $q$th element of the vector $\bar{x}\in\mathbf{R}^n$, or in other words, $\bar{x}_q = \sum_{j=1}^N x_{q_j}$.  $x_1$ corresponds to the intercept and is not regularize so we treat it differently from the other values in the vector.  $k$ is the iteration number, and $\rho^k$ is the penalty parameter for iteration $k$, which is used as the step size.
+where $\bar{x}_q$ represents the average across all mappers of the $q$th element of the vector $\bar{x}\in\mathbf{R}^n$, in other words: $\bar{x}_q = \sum_{j=1}^N x_{q_j}$, and similarly for $\bar{u}$.  The first elements, $\bar{x}_1$ and $\bar{u}_1$, correspond to the intercept and are not regularized, therefore we must treat them differently from the other values in the vector.  $k$ is the iteration number, and $\rho^k$ is the penalty parameter for iteration $k$, which is used as the step size.
 
 For each mapper $j$, $\mathbf{A_{i_j}}$ and $b_{i_j}$ are the portion of the data assigned to and used in that mapper.  The values of the $x_{_j}$ are calculated in parallel on the mappers while the values of $z$ and $u$ are calculated on the reducer.
 
