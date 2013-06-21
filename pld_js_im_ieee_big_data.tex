@@ -244,7 +244,8 @@ where $x_{_j}\in\mathbf{R}^n$ is the logistic regression fit on machine $j$ and 
 The ADMM algorithm for the above problem is:
 \begin{align}
 \label{eq:x}
-x_{_j}^{k+1} :=&\quad \argmin_{x_{_j}} \sum_{i_j=1}^{m_j} \log(-b_{i_j}\mathbf{A}_{i_j}^Tx_{_j})+ \dfrac{\rho^k}{2}\|x_{_j} - z^k + u_{_j}^k\|_2^2\\
+x_{_j}^{k+1} :=&\quad \argmin_{x_{_j}} \sum_{i_j=1}^{m_j} \log(-b_{i_j}\mathbf{A}_{i_j}^Tx_{_j}) \\
+&\quad\quad\quad+ \dfrac{\rho^k}{2}\|x_{_j} - z^k + u_{_j}^k\|_2^2 \nonumber\\
 \label{eq:z}
 z^{k+1} :=&\quad \begin{cases}
     \bar{x}_q^{k+1} + \bar{u}_q^k& \text{if $q=1$}\\
@@ -255,8 +256,7 @@ z^{k+1} :=&\quad \begin{cases}
 \label{eq:u}
 u_j^{k+1} :=&\quad u_j^k + x_j^{k+1} + z^{k+1},
 \end{align}
-\todo{in above I changed $u_i$ to $u_j$, shouldn't this align with the $x_j$?}
-where $k$ is the iteration number, $\rho^k$ is the penalty parameter for iteration $k$, which is used as the step size, and $\bar{x}_q$ represents the average across all mappers of the $q$th element of the vector $\bar{x}\in\mathbf{R}^n$.  Formally, $\bar{x}_q = \sum_{j=1}^N x_{q_j}$, and similarly for $\bar{u}$.  The first elements of $\bar{x}$ and $\bar{u}$, $\bar{x}_1$ and $\bar{u}_1$, correspond to the intercept and are not regularized, therefore we must treat them differently from the other values in the vector.
+where $k$ is the iteration number, $\rho^k$ is the penalty parameter for iteration $k$, which is used as the step size, and $\bar{x}_q$ represents the average across all mappers of the $q$th element of the vector $\bar{x}\in\mathbf{R}^n$.  Formally, $\bar{x}_q = \sum_{j=1}^N \dfrac{x_{q_j}}{N}$, and similarly for $\bar{u}$.  The first elements of $\bar{x}$ and $\bar{u}$, $\bar{x}_1$ and $\bar{u}_1$, correspond to the intercept and are not regularized, therefore we must treat them differently from the other values in the vector.
 
 For each mapper $j$, $\mathbf{A}_{i_j}$ and $b_{i_j}$ are the portion of the data assigned to and used in that mapper.  The values of the $x_{_j}$ are calculated in parallel on the mappers while the values of $z$ and $u$ are calculated on the reducer.  The convex minimization problem for each $x_{_j}$ update is solved using the L-BFGS (low-memory BFGS) method \cite{bonnans2003numerical}.  We use a Java implementation of L-BFGS which is self contained and has performed well on Hadoop nodes.\footnote{\url{https://code.google.com/p/vladium/}}
 
@@ -293,14 +293,13 @@ where $r^k$ is the primal residual, $s^k$ is the dual residual, and $\mu>1$, $\t
 \subsubsection{Considerations for MapReduce}
 Algorithm \ref{alg:admm} shows the coordination algorithm for executing the ADMM iterations.  After having completed a mapper and reducer cycle, the algorithm will have finished one iteration and control returns to the driver.  One line 3 the ADMM driver checks to see if the maximum number of iterations have passed or if the predictions have converged.  If this condition is false, we distribute the $z$ and $u_i$ to the mappers and begin the next iteration on lines 5 through 13.  If this condition is true, the algorithm is complete and we write the results to persistent storage, a bucket on Amazon's simple storage service (Amazon S3), and exit.
 
-\todo{double check the while condition}
 \begin{algorithm}
 \SetAlgoLined
 \KwData{feature matrix $\mathbf{A}$ and vector of target values $b$}
 \KwResult{a vector of predicted weights $z$}
 $k=0$\\
 $m=\text{[the number of mapper nodes]}$\\
-\While{$k<$ maxIterations and $r^k<r^{k-1}$}{\label{alg:while}
+\While{$\|r^k\|_2 > \epsilon^{pri}$ and $\|s^k\|_2 > \epsilon^{dual}$ and $k<$ maxIterations}{\label{alg:while}
   \For{$j=1\to N$}{
     update $x_{_j}^k$ using Eq. \ref{eq:x}
   }
@@ -324,7 +323,7 @@ Wherever feasible, we have made the implementation of the ADMM algorithm generic
 \section{Results}\label{sec:results}
 As part of our modeling pipeline, we run the ADMM algorithm daily on nearly a terabyte of data.  As depicted in Figure \ref{fig:workflow}, we load the data and a Jar file containing the ADMM algorithm, from Amazon S3 and into EMR instances.  To evaluate the performance of our implementation of the ADMM algorithm, we examine the output of one day's run to compare the change in loss function per iteration.  We have also examined equivalent results from other days and saw that these results do not vary substantially from day to day.
 
-Figure \ref{fig:iter} shows the difference between the predicted values and the actual values per iteration on a logarithmic scale.  The loss decreases, and therefore the accuracy consistently improves, as more iterations pass.  The steep decline at iteration 8 aligns with a substantial increase in the dual residual (not shown).  \todo{The dual residual represents the [...].} After iteration 8 we see an exponential decay in loss function for the subsequent iterations.
+Figure \ref{fig:iter} shows the difference between the predicted values and the actual values per iteration on a logarithmic scale.  The loss decreases, and therefore the accuracy consistently improves, as more iterations pass.  The steep decline at iteration 8 aligns with a substantial increase in the dual residual (not shown).  The dual residual equals $N\rho\|\bar{x}^k-\bar{x}^{k-1}\|^2_2$, the (scaled) step size between successive iterations. After iteration 8 we see an exponential decay in loss function for the subsequent iterations.
 
 \begin{figure}[!t]
 \centering
