@@ -319,7 +319,9 @@ Wherever feasible, we have made the implementation of the ADMM algorithm generic
 \section{Results}\label{sec:results}
 As part of our modeling pipeline, we run the ADMM algorithm daily on nearly a terabyte of data.  As depicted in Figure \ref{fig:workflow}, we load the data and a Jar file containing the ADMM algorithm, from Amazon S3 and into EMR instances.  To evaluate the performance of our implementation of the ADMM algorithm, we examine the output of one day's run to compare the change in loss function per iteration.  We have also examined equivalent results from other days and saw that these results do not vary substantially from day to day.
 
-Figure \ref{fig:iter} shows the difference between the predicted values and the actual values per iteration on a logarithmic scale.  The loss decreases, and therefore the accuracy consistently improves, as more iterations pass.  The steep decline at iteration 8 aligns with a substantial increase in the dual residual (not shown).  The dual residual equals $N\rho\|\bar{x}^k-\bar{x}^{k-1}\|^2_2$, the (scaled) step size between successive iterations. After iteration 8 we see an exponential decay in loss function for the subsequent iterations.
+Figure \ref{fig:iter} shows the difference between the predicted values and the actual values per iteration on a logarithmic scale.  The loss decreases, and therefore the accuracy consistently improves, as more iterations pass.  The steep decline at iteration 8 aligns with a substantial increase in the dual residual (not shown).  The dual residual equals
+$$N\rho\|\bar{x}^k-\bar{x}^{k-1}\|^2_2,$$
+which is the scaled step size between successive iterations. After iteration 8 we see an exponential decay in loss function for the subsequent iterations.
 
 \begin{figure}[!t]
 \centering
