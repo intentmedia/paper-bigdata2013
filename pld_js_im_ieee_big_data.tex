@@ -195,12 +195,15 @@ The ADMM algorithm is a general distributed convex optimization algorithm that c
 
 Here we focus on Logistic Regression with L2 norm. Traditional batch algorithms used to fit logistic regression require that the training dataset fit into memory.  This requires that memory scale with the size of the dataset.
 
-The ADMM algorithm does not require that data fit into memory on a single machine, instead computing the solution to an intermediate optimization problem on subsets of the training data and combining the intermediate solutions to find a consensus solution at each iteration \cite{boyd}. Although the iterations must be run sequentially, the time-consuming and memory-intensive computation of the intermediate optimization problems is distributed to enable solving the problem in Equation \ref{eq:formula} \todo{I removed the equations here, but it may make sense to move up the first two (non-distributed) equations from the Implementation section} on a large dataset.  Given a Hadoop-based implementation of the algorithm, the size of memory can be scaled with the dataset just by adding more machines to the Hadoop cluster.
+The ADMM algorithm does not require that data fit into memory on a single machine, instead computing the solution to an intermediate optimization problem on subsets of the training data and combining the intermediate solutions to find a consensus solution at each iteration \cite{boyd}. Although the iterations must be run sequentially, the time-consuming and memory-intensive computation of the intermediate optimization problems, this allows it to scale and fit models to large dataset.  Given a Hadoop-based implementation of the algorithm, the size of memory can be scaled with the dataset by simply adding more machines to the Hadoop cluster.
+
+\todo{The below is a new \P}
+
+Many challenging problem domains, e.g. online advertising attribution, are very noisy and difficult to fit models for.  Modeling in these domains requires both lots of data and an interpretable model which can accommodate noisy feature matrices.  The ADMM algorithm allows us to address these problems with logistic regression, and other convex optimization models.  Our main contribution is an algorithm that makes large-scale logistic regression user-friendly on a popular platform.  Using our implementation, data scientists can accurately fit models without tuning meta-parameters (aside from a regularization parameter).
 
 The rest of the paper is organized as follows.  In section \ref{sec:imp} we provide details concerning our implementation of the ADMM algorithm, its application to logistic regression, and how to implement it in Hadoop MapReduce.  In section \ref{sec:results} we present the results of running ADMM on a production scale dataset.  In section \ref{sec:related} we review recent work related to iterative optimization with Hadoop, and in section \ref{sec:conc} we conclude.
 
-\section{Implementation}\label{sec:imp}
-\todo{may make sense to split subsections A and B into two sections, one for "Problem Formulation" and one for "Implementation"}
+\section{Problem Formulation}\label{sec:imp}
 Here we describe exactly how we implemented ADMM for Hadoop MapReduce and provide practical details relevant to using it to build models in a production environment.
 
 \begin{figure}[!t]
@@ -223,7 +226,7 @@ In the case of L2 regularized logistic regression the problem becomes:
 \begin{align*}
 \text{minimize}&\quad \sum_{i=1}^m \log(-b_i\mathbf{A}_i^Tx) + \lambda\|x\|_2^2,
 \end{align*}
-where $\lambda$ is the regularization factor.2‎
+where $\lambda$ is the regularization factor.
 
 Rephrasing in ADMM global consensus form and reflecting the partitioning of training examples across $N$ machines in the cluster, the problem becomes:
 \begin{align*}
@@ -238,6 +241,7 @@ The ADMM algorithm for the above problem is:
 \label{eq:x}
 x_{_j}^{k+1} :=&\quad \argmin_{x_{_j}} \sum_{i_j=1}^{m_j} \log(-b_{i_j}\mathbf{A}_{i_j}^Tx_{_j}) \\
 &\quad\quad\quad+ \dfrac{\rho^k}{2}\|x_{_j} - z^k + u_{_j}^k\|_2^2 \nonumber\\
+\nonumber\\
 \label{eq:z}
 z^{k+1} :=&\quad \begin{cases}
     \bar{x}_q^{k+1} + \bar{u}_q^k& \text{if $q=1$}\\
@@ -252,7 +256,7 @@ where $k$ is the iteration number, $\rho^k$ is the penalty parameter for iterati
 
 For each mapper $j$, $\mathbf{A}_{i_j}$ and $b_{i_j}$ are the portion of the data assigned to and used in that mapper.  The values of the $x_{_j}$ are calculated in parallel on the mappers while the values of $z$ and $u$ are calculated on the reducer.  The convex minimization problem for each $x_{_j}$ update is solved using the L-BFGS (low-memory BFGS) method \cite{bonnans2003numerical}.  We use a Java implementation of L-BFGS which is self contained and has performed well on Hadoop nodes.\footnote{\url{https://code.google.com/p/vladium/}}
 
-\subsection{ADMM within MapReduce}
+\section{Implementation}
 The MapReduce model divides into three phases: the map, the shuffle, and the reduce.  In the mapper phase the input data is split among a set of mappers and each mapper applies a function to the set of data assigned to it.  In the shuffle phase the output of the mappers is assigned to a reducer, and then in the reduce phase the mapper output is aggregated to create the final values output by the reducer.  We may express the map and reduce steps as:
 \begin{alignat*}{2}
 &\text{map}\quad &(k_1,v_2)\quad\rightarrow &\texttt{list}(k_2,v_2)\\
@@ -262,12 +266,12 @@ where each mapper has a unique key $k_1$.  The shuffle is concerned with mapping
 
 To implement MapReduce in Hadoop we define classes for the mapper, the reducer, and a driver that handles input arguments and specifies the mapper and reducer classes (the shuffle is handled by Hadoop).  In the context of ADMM each mapper performs the resource intensive task of computing the current $x_{_j}$.  After all mappers have completed their computations, we use a single reducer to compute the $z$ and $u_{_j}$ updates.
 
-\subsubsection{Peristent Data with Input Splits}
+\subsection{Peristent Data with Input Splits}
 In the ADMM algorithm, when each mapper calculates the $x_{_j}^{k+1}$ values, on iteration $k+1$, it must use the $u_{_j}^k$ values that were calculated for the same mapper in the previous iteration, $k$.  Hadoop does not normally accommodate this sort of persistence.  \cite{boyd} suggests using Apache HBase, a distributed data store, however this would add a new component and its accompanying complexity to the modeling framework.
 
 As an alternative, we use Hadoop's notion of input splits to keep track of where data is stored and to associate the correct $x_{_j}$ and $u_{_j}$ values with each other.  Input splits specify a \emph{split length} and a \emph{split ID}, which determine the size of the split data and the node on which to perform computations on that data, respectively.  To ensure that the correct $u_{_j}$ values are loaded when calculating an $x_{_j}$ value, the mapper reads the split ID and chooses the $u_i$ values based on this split ID.  The $z$ values are the same in each $x_{_j}$ formula, i.e. across mappers, and we simply replicate the current $z$ values across all mappers at the start of each iteration.
 
-\subsubsection{Automatically Updating $\rho$}
+\subsection{Automatically Updating $\rho$}
 
 We use the reducer to update the penalty parameter $\rho$.  The number of iterations before convergence depends upon the $\rho$ parameter, and hand-tuning $\rho$ can take a significant amount of time.  This is because we must wait for the algorithm to complete before determining the efficacy of the chosen $\rho$.
 
@@ -282,7 +286,7 @@ By varying the penalty parameter we can reduce the performance impact of our ini
 \end{equation}
 where $r^k$ is the primal residual, $s^k$ is the dual residual, and $\mu>1$, $\tau^{\text{incr}}>1$, and $\tau^{\text{decr}}>1$ are user-specified parameters.  We have used the typical values of $\mu=10$ and $\tau^{\text{incr}}=\tau^{\text{decr}}=2$.
 
-\subsubsection{Considerations for MapReduce}
+\subsection{Considerations for MapReduce}
 Algorithm \ref{alg:admm} shows the coordination algorithm for executing the ADMM iterations.  After having completed a mapper and reducer cycle, the algorithm will have finished one iteration and control returns to the driver.  One line 3 the ADMM driver checks to see if the maximum number of iterations have passed or if the predictions have converged.  If this condition is false, we distribute the $z$ and $u_i$ to the mappers and begin the next iteration on lines 5 through 13.  If this condition is true, the algorithm is complete and we write the results to persistent storage, a bucket on Amazon's simple storage service (Amazon S3), and exit.
 
 \begin{algorithm}
