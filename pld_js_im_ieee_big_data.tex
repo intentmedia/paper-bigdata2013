@@ -242,7 +242,7 @@ z^{k+1} :=&\quad \begin{cases}
   \end{cases}\\
 \nonumber\\
 \label{eq:u}
-u_j^{k+1} :=&\quad u_j^k + x_j^{k+1} + z^{k+1},
+u_j^{k+1} :=&\quad u_j^k + x_j^{k+1} - z^{k+1},
 \end{align}
 where $k$ is the iteration number, $\rho^k$ is the penalty parameter (see Section III) for iteration $k$, and $\bar{x}_q$ represents the average across all mappers of the $q$th element of the vector $\bar{x}\in\mathbf{R}^n$.  Formally, $\bar{x}_q = \dfrac{1}{N}\sum_{j=1}^N x_{q_j}$, and similarly for $\bar{u}$.  The first elements of $\bar{x}$ and $\bar{u}$, $\bar{x}_1$ and $\bar{u}_1$, correspond to the intercept and are not regularized, therefore we must treat them differently from the other values in the vector.
 
