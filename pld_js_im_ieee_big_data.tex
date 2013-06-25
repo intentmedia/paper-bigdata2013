@@ -283,7 +283,7 @@ where $r^k$ is the primal residual, $s^k$ is the dual residual, and $\mu>1$, $\t
 \subsection{Considerations for MapReduce}
 \begin{figure}
 \begin{algorithmic}[1]
-\Procedure {ADMM}{$\mathbf{A}$, $b$, $m$, $maxIterations$}
+\Procedure {ADMM}{$\mathbf{A}$, $b$, $N$, $maxIterations$}
   \State $k=0$
   \While{$notConverged$ and $k<maxIterations$}\label{alg:while}
     \For{$j=1\to N$}\label{alg:startInner}
@@ -304,7 +304,7 @@ where $r^k$ is the primal residual, $s^k$ is the dual residual, and $\mu>1$, $\t
 \end{figure}
 
 Figure \ref{alg:admm} shows the coordination algorithm for executing the ADMM iterations.  The feature matrix $\mathbf{A}$, the
-vector of target values $b$, the number of mapper nodes $m$, and the maximum number of iterations $maxIterations$, are input to the procedure.  The procedure begins by initializing the current iteration to zero and passing control to the driver.  On line \ref{alg:while} the driver checks that the algorithm has not converged and that the number of iterations is less than the maximum number of iterations.  We assume there is a helper function $notConverged$, which returns true if and only if $\|r^k\|_2 > \epsilon^{pri} \quad\text{and}\quad \|s^k\|_2 > \epsilon^{dual}.$
+vector of target values $b$, the number of mapper nodes $N$, and the maximum number of iterations $maxIterations$, are input to the procedure.  The procedure begins by initializing the current iteration to zero and passing control to the driver.  On line \ref{alg:while} the driver checks that the algorithm has not converged and that the number of iterations is less than the maximum number of iterations.  We assume there is a helper function $notConverged$, which returns true if and only if $\|r^k\|_2 > \epsilon^{pri} \quad\text{and}\quad \|s^k\|_2 > \epsilon^{dual}.$
 
 If the driver has not converged and the maximum number of iterations have not passed, we distribute the $z$ and $u_i$ to the mappers and begin the next iteration.  Lines \ref{alg:startInner} through \ref{alg:endInner} show the $x_j^k$, $z^k$, $u_j^k$, and $\rho^k$ updates that occur in the mappers and reducer on each iteration.  Alternatively, if the while loop condition is false, the algorithm is complete and the result is the current vector of predicted weights, $z^k$.  After completion we write this result to persistent storage, on line \ref{alg:output}, and exit.
 
