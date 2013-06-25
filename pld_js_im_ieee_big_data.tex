@@ -210,20 +210,20 @@ In this section we describe exactly how we formulate regularized Logistic Regres
 
 In general, the (not necessarily distributed) convex model fitting problem with regularization can be written as:
 \begin{align*}
-\text{minimize}&\quad \sum_{i=1}^m l_i(\mathbf{A}_i^Tx - b_i) + r(x),
+\text{minimize}&\quad \dfrac{1}{m}\sum_{i=1}^m l_i(\mathbf{A}_i^Tx - b_i) + r(x),
 \end{align*}
 where $l_i$ is the loss for training example $i$, $r$ is a regularization term, and $x\in\mathbf{R}^n$ is the vector that solves the optimization problem and defines the logistic regression model.
 
 In the case of L2 regularized logistic regression the problem becomes:
 \begin{align*}
-\text{minimize}&\quad \sum_{i=1}^m \log(-b_i\mathbf{A}_i^Tx) + \lambda\|x\|_2^2,
+\text{minimize}&\quad \dfrac{1}{m}\sum_{i=1}^m \log(1 + exp(-b_i\mathbf{A}_i^Tx)) + \lambda\|x\|_2^2,
 \end{align*}
 where $\lambda$ is the regularization factor.
 
 Rephrasing in ADMM global consensus form and reflecting the partitioning of training examples across $N$ machines in the cluster, the problem becomes:
 \begin{align*}
-\text{minimize}&\quad \sum_{i_1=1}^{m_1} \log(-b_{i_1}\mathbf{A}_{i_1}^Tx_{_1})+\ldots \\
-&\quad+\sum_{i_N=1}^{m_N} \log(-b_{i_N}\mathbf{A}_{i_N}^Tx_{_N})+\lambda\|z\|_2^2\\
+\text{minimize}&\quad \dfrac{1}{m}\sum_{i_1=1}^{m_1} \log(1 + exp(-b_{i_1}\mathbf{A}_{i_1}^Tx_{_1}))+\ldots \\
+&\quad+\dfrac{1}{m}\sum_{i_N=1}^{m_N} \log(1 + exp(-b_{i_N}\mathbf{A}_{i_N}^Tx_{_N}))+\lambda\|z\|_2^2\\
 \text{subject to}&\quad x_{_j} - z = 0, j = 1, \ldots, N
 \end{align*}
 where $x_{_j}\in\mathbf{R}^n$ is the logistic regression fit on machine $j$ and $z\in\mathbf{R}^n$ is a variable representing the global consensus.  After running the algorithm, $z$ is the vector of parameters that defines the model. The constraint, $x_j-z=0$, enforces equality of the parameter estimates across machines.
@@ -231,7 +231,7 @@ where $x_{_j}\in\mathbf{R}^n$ is the logistic regression fit on machine $j$ and 
 The ADMM algorithm for the above problem is:
 \begin{align}
 \label{eq:x}
-x_{_j}^{k+1} :=&\quad \argmin_{x_{_j}} \sum_{i_j=1}^{m_j} \log(-b_{i_j}\mathbf{A}_{i_j}^Tx_{_j}) \\
+x_{_j}^{k+1} :=&\quad \argmin_{x_{_j}} \dfrac{1}{m}\sum_{i_j=1}^{m_j} \log(1 + exp(-b_{i_j}\mathbf{A}_{i_j}^Tx_{_j})) \\
 &\quad\quad\quad+ \dfrac{\rho^k}{2}\|x_{_j} - z^k + u_{_j}^k\|_2^2 \nonumber\\
 \nonumber\\
 \label{eq:z}
