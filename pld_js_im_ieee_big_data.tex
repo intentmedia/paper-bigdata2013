@@ -231,7 +231,7 @@ where $x_{_j}\in\mathbf{R}^n$ is the logistic regression fit on machine $j$ and 
 The ADMM algorithm for the above problem is:
 \begin{align}
 \label{eq:x}
-x_{_j}^{k+1} :=&\quad \argmin_{x_{_j}} \dfrac{1}{m}\sum_{i_j=1}^{m_j} \log(1 + exp(-b_{i_j}\mathbf{A}_{i_j}^Tx_{_j})) \\
+x_{_j}^{k+1} :=&\quad \argmin_{x_{_j}} \dfrac{1}{m_j}\sum_{i_j=1}^{m_j} \log(1 + exp(-b_{i_j}\mathbf{A}_{i_j}^Tx_{_j})) \\
 &\quad\quad\quad+ \dfrac{\rho^k}{2}\|x_{_j} - z^k + u_{_j}^k\|_2^2 \nonumber\\
 \nonumber\\
 \label{eq:z}
