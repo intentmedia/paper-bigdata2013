@@ -1,6 +1,4 @@
 paper-bigdata2013
 =================
 
-TODOs
-
-* replace graph in paper with new betas (comments here, https://www.pivotaltracker.com/story/show/52247031)
+Repository for files relating to the Intent Media IEEE Big Data 2013 industry track paper.
