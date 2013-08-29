@@ -226,7 +226,7 @@ Rephrasing in ADMM global consensus form and reflecting the partitioning of trai
 &\quad+\dfrac{1}{m}\sum_{i_N=1}^{m_N} \log(1 + \exp(-b_{i_N}\mathbf{A}_{i_N}^Tx_{_N}))+\lambda\|z\|_2^2\\
 \text{subject to}&\quad x_{_j} - z = 0, j = 1, \ldots, N
 \end{align*}
-where $x_{_j}\in\mathbf{R}^n$ is the logistic regression fit on machine $j$.  $z\in\mathbf{R}^n$ is a variable representing the global consensus, the vector of parameters that defines the model result. The constraint, $x_j-z=0$, enforces equality of the parameter estimates across machines.
+where $x_{_j}\in\mathbf{R}^n$ is the logistic regression fit on node $j$.  $z\in\mathbf{R}^n$ is a variable representing the global consensus, the vector of parameters that defines the model result. The constraint, $x_j-z=0$, enforces equality of the parameter estimates across machines.
 
 The ADMM algorithm for the above problem is:
 \begin{align}
@@ -339,7 +339,7 @@ The algorithm and our implementation are based upon \cite{boyd}, which introduce
 \cite{planet} presents a MapReduce implementation of tree ensemble learning and uses a wrapper for MapReduce to coordinate iterations of the underlying algorithm.  \cite{linkolcz2012} presents a distributed method for classification that is similar to random forests. Apache Mahout contains an implementation of logistic regression that uses stochastic gradient descent (SGD).\footnote{https://cwiki.apache.org/confluence/display/MAHOUT/Logistic+Regression}  As noted in \cite{agarwal2011}, this SGD implementation is sequential, which substantially limits the performance of the algorithm and makes it difficult to scale.  To address this, \cite{agarwal2011} presents a scalable convex loss system that uses a Hadoop compatible variant of MapReduce.
 
 \section{Conclusion}\label{sec:conc}
-Using an ADMM implementation for MapReduce allows a simpler workflow when moving modeling ideas from prototype to production-scale.  We showed a specific example of using the ADMM algorithm to build a logistic regression model.  Importantly, ADMM is a generic optimization algorithm that we can apply to other modeling problems with minimal modification.  Our contribution is a generic distributed optimization algorithm for Hadoop that allows users to experiment with many different models at scale.
+Using an ADMM implementation for MapReduce allows a simpler workflow when moving modeling ideas from prototype to production-scale.  We showed a specific example of using the ADMM algorithm to build a logistic regression model.  Importantly, ADMM is a generic optimization algorithm that can be applied to other problems with minimal modification.  Our contribution is a distributed implementation on Hadoop that allows users to experiment with many different models at scale.
 % conference papers do not normally have an appendix
 
 
