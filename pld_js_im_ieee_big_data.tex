@@ -136,7 +136,7 @@
 %
 % paper title
 % can use linebreaks \\ within to get better formatting as desired
-\title{Practical Distributed Classification using the\\ Alternating Direction Method of Multipliers Algorithm}
+\title{\vspace{-2.65em}Practical Distributed Classification using the\\ Alternating Direction Method of Multipliers Algorithm}
 
 
 % author names and affiliations
@@ -202,16 +202,16 @@ When executing long-running modeling jobs hand-tuning parameters can be especial
 
 Our main contribution is an adaptation of ADMM that makes large-scale logistic regression user-friendly on a popular platform.  Using our implementation, data scientists can accurately fit models without tuning meta-parameters.
 
-The rest of the paper is organized as follows.  In section \ref{sec:prob} we formulate logistic regression using the ADMM algorithm and describe the equations necessary to calculate intermediate values.  Based upon the formulae and procedures developed, section \ref{sec:imp} provides a brief review of MapReduce and the necessary details concerning how to implement the ADMM algorithm within Hadoop MapReduce.  We present the results of using ADMM to model a production scale dataset of website visitors in section \ref{sec:results}.  In section \ref{sec:related} we review recent work related to iterative optimization with Hadoop, and in section \ref{sec:conc} we conclude.
+The rest of the paper is organized as follows.  In section \ref{sec:prob} we formulate logistic regression using the ADMM algorithm and describe the equations necessary to calculate intermediate values.  Based upon the formulae and procedures we develop, section \ref{sec:imp} provides a brief review of MapReduce and the necessary details concerning how to implement the ADMM algorithm within Hadoop MapReduce.  We present the results of using ADMM to model a production scale dataset of website visitors in section \ref{sec:results}.  In section \ref{sec:related} we review recent work related to iterative optimization with Hadoop, and in section \ref{sec:conc} we conclude.
 
 \section{Problem Formulation}\label{sec:prob}
 
 In this section we describe exactly how we formulate regularized Logistic Regression with ADMM. Given a matrix of features $\mathbf{A}\in\mathbf{R}^{m\times n}$ and a vector of their labels $b\in\mathbf{R}^m$ with $b_i\in\{-1,1\}$, our goal is to compute the probability $\text{Pr}(b_i=1|\mathbf{A}_i)$ for each row $1\leq i\leq m$.  The first column of the feature matrix represents the intercept and all values in this column are set to 1.
 
 In general, the (not necessarily distributed) convex model fitting problem with regularization can be written as:
-\begin{align*}
-\text{minimize}&\quad \dfrac{1}{m}\sum_{i=1}^m l_i(\mathbf{A}_i^Tx - b_i) + r(x),
-\end{align*}
+\begin{align}
+\text{minimize}&\quad \dfrac{1}{m}\sum_{i=1}^m l_i(\mathbf{A}_i^Tx - b_i) + r(x),\label{eq:primal}
+\end{align}
 where $l_i$ is the loss for training example $i$, $r$ is a regularization term, and $x\in\mathbf{R}^n$ is the vector that solves the optimization problem and defines the logistic regression model.
 
 In the case of L2 regularized logistic regression the problem becomes:
@@ -220,7 +220,7 @@ In the case of L2 regularized logistic regression the problem becomes:
 \end{align*}
 where $\lambda$ is the regularization factor.
 
-Rephrasing in ADMM global consensus form and reflecting the partitioning of training examples across $N$ machines in the cluster, the problem becomes:
+If we reformulate the above in ADMM global consensus form and reflect the partitioning of training examples across $N$ machines in the cluster, the problem becomes:
 \begin{align*}
 \text{minimize}&\quad \dfrac{1}{m}\sum_{i_1=1}^{m_1} \log(1 + \exp(-b_{i_1}\mathbf{A}_{i_1}^Tx_{_1}))+\ldots \\
 &\quad+\dfrac{1}{m}\sum_{i_N=1}^{m_N} \log(1 + \exp(-b_{i_N}\mathbf{A}_{i_N}^Tx_{_N}))+\lambda\|z\|_2^2\\
@@ -306,7 +306,7 @@ where $r^k$ is the primal residual, $s^k$ is the dual residual, and $\mu>1$, $\t
 Figure \ref{alg:admm} shows the coordination algorithm for executing the ADMM iterations.  The feature matrix $\mathbf{A}$, the
 vector of target values $b$, the number of mapper nodes $N$, and the maximum number of iterations $maxIterations$, are input to the procedure.  The procedure begins by initializing the current iteration number to zero and passing control to the driver.  On line \ref{alg:while} the driver checks that the algorithm has not converged and that the number of iterations is less than the maximum number of iterations.  We assume there is a helper function $notConverged$, which returns true unless $\|r^k\|_2 \le \epsilon^{pri} \quad\text{and}\quad \|s^k\|_2 \le \epsilon^{dual}.$
 
-If the driver has not converged and the maximum number of iterations have not passed, we distribute the $z$ and $u_i$ to the mappers and begin the next iteration.  Lines \ref{alg:startInner} through \ref{alg:endInner} show the $x_j^k$, $z^k$, $u_j^k$, and $\rho^k$ updates that occur in the mappers and reducer on each iteration.  Alternatively, if the while loop condition is false, the algorithm is complete and the result is the current vector of predicted weights, $z^k$.  After completion we write this result to persistent storage, on line \ref{alg:output}, and exit.
+If the driver has not converged and the maximum number of iterations has not passed, we distribute the $z$ and $u_i$ to the mappers and begin the next iteration.  Lines \ref{alg:startInner} through \ref{alg:endInner} show the $x_j^k$, $z^k$, $u_j^k$, and $\rho^k$ updates that occur in the mappers and reducer on each iteration.  Alternatively, if the while loop condition is false, the algorithm is complete and we output the current vector of predicted weights, $z^k$, to persistent storage and exit, as show on line \ref{alg:output}.
 
 The output data is written to, and the input data is read from, Amazon's simple storage service (S3). To reduce the network latency involved in transferring data from S3 to the MapReduce nodes, we store the data---feature matrix $\mathbf{A}$ and target values $b$---directly on the nodes via HDFS.  An advantage of running Hadoop on Amazon's Elastic Map Reduce (EMR) service and using data stored in S3 is that there are no transfer fees when moving data between these two systems.  The infrastructure workflow is shown in Figure \ref{fig:workflow}.
 
@@ -324,12 +324,12 @@ As part of our modeling pipeline, we run the ADMM algorithm daily on rolling his
 
 As depicted in Figure \ref{fig:workflow}, we load the data and a Jar file containing the ADMM algorithm from S3 into EMR.  To evaluate the performance of our implementation of the ADMM algorithm, we examine the output of one day's run.  We measure performance by comparing the change in loss function per iteration.  We have also examined equivalent results from other days and verified that the results do not vary substantially from day to day.
 
-Figure \ref{fig:iter} shows the difference between the predicted values and the actual values per iteration on a logarithmic scale.  The loss decreases, and therefore the accuracy consistently improves as more iterations pass.  On a cluster of 20 high memory quadruple extra large EMR instances, 25 iterations run in 1 hour and 25 minutes.
+We plot the progress of our algorithm by showing that the value we are minimizing in Equation \ref{eq:primal} decreases per iteration.  Figure \ref{fig:iter} shows this through the estimated loss in primal objective value, which we calculate by subtracting from the current primal objective value an approximated minimum primal objective value taken after a large number of iterations (75 in this case).   The estimated loss is plotted for each of the first 30 iterations on a logarithmic scale.  We see that the loss decreases, and therefore that the accuracy consistently improves as more iterations pass.  On a cluster of 20 high memory quadruple extra large EMR instances, 25 iterations run in 1 hour and 25 minutes.
 
 \begin{figure}[!t]
 \centering
-\includegraphics[width=3.2in]{iter_rnorm_plot}
-\caption{Loss between our model's predictions and the actual values per iteration, plotted on a logarithmic scale.  We see that the loss decreases dramatically and then decelerates during later iterations.}
+\includegraphics[width=3.2in]{primal_objective_loss}
+\caption{The difference between the model's predictions of the primal objective values and the ``true'' value as approximated by the predicted primal objective value after a large number of iterations. The loss decreases dramatically and then continues to decelerate during later iterations.}
 \label{fig:iter}
 \end{figure}
 
@@ -339,7 +339,7 @@ The algorithm and our implementation are based upon \cite{boyd}, which introduce
 \cite{planet} presents a MapReduce implementation of tree ensemble learning and uses a wrapper for MapReduce to coordinate iterations of the underlying algorithm.  \cite{linkolcz2012} presents a distributed method for classification that is similar to random forests. Apache Mahout contains an implementation of logistic regression that uses stochastic gradient descent (SGD).\footnote{https://cwiki.apache.org/confluence/display/MAHOUT/Logistic+Regression}  As noted in \cite{agarwal2011}, this SGD implementation is sequential, which substantially limits the performance of the algorithm and makes it difficult to scale.  To address this, \cite{agarwal2011} presents a scalable convex loss system that uses a Hadoop compatible variant of MapReduce.
 
 \section{Conclusion}\label{sec:conc}
-Using an ADMM implementation for MapReduce allows a simpler workflow when moving modeling ideas from prototype to production-scale.  We showed a specific example of using the ADMM algorithm to build a logistic regression model.  Importantly, ADMM is a generic optimization algorithm that can be applied to other problems with minimal modification.  Our contribution is a distributed implementation on Hadoop that allows users to experiment with many different models at scale.
+Using an ADMM implementation for MapReduce allows a simpler workflow when moving modeling ideas from prototype to production-scale.  We showed a specific example of using the ADMM algorithm to build a logistic regression model.  Importantly, ADMM is a generic optimization algorithm that can be applied to other problems with minimal modification.  Our contribution is a distributed implementation on Hadoop that allows users to experiment with many different models at scale.  In future work we plan to support additional convex loss optimization problems.
 % conference papers do not normally have an appendix
 
 
