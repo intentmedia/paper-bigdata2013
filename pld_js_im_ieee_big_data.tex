@@ -324,12 +324,12 @@ As part of our modeling pipeline, we run the ADMM algorithm daily on rolling his
 
 As depicted in Figure \ref{fig:workflow}, we load the data and a Jar file containing the ADMM algorithm from S3 into EMR.  To evaluate the performance of our implementation of the ADMM algorithm, we examine the output of one day's run.  We measure performance by comparing the change in loss function per iteration.  We have also examined equivalent results from other days and verified that the results do not vary substantially from day to day.
 
-We plot the progress of our algorithm by showing that the value we are minimizing in Equation \ref{eq:primal} decreases per iteration.  Figure \ref{fig:iter} shows this through the estimated loss in primal objective value, which we calculate by subtracting from the current primal objective value an approximated minimum primal objective value taken after a large number of iterations (75 in this case).   The estimated loss is plotted for each of the first 30 iterations on a logarithmic scale.  We see that the loss decreases, and therefore that the accuracy consistently improves as more iterations pass.  On a cluster of 20 high memory quadruple extra large EMR instances, 25 iterations run in 1 hour and 25 minutes.
+We plot the progress of our algorithm by showing that the value we are minimizing in Equation \ref{eq:primal} decreases per iteration.  Figure \ref{fig:iter} shows this through the estimated loss in primal objective value, which we calculate by subtracting from the current primal objective value an approximated minimum primal objective value taken after many iterations (75 in this case).   The estimated loss is plotted for each of the first 30 iterations on a logarithmic scale.  We see that the loss decreases, and therefore that the accuracy consistently improves as more iterations pass.  On a cluster of 20 high memory quadruple extra large EMR instances, 25 iterations run in 1 hour and 25 minutes.
 
 \begin{figure}[!t]
 \centering
 \includegraphics[width=3.2in]{primal_objective_loss}
-\caption{The difference between the model's predictions of the primal objective values and the ``true'' value as approximated by the predicted primal objective value after a large number of iterations. The loss decreases dramatically and then continues to decelerate during later iterations.}
+\caption{The difference between the model's predictions of the primal objective values and the ``true'' value as approximated by the model after many iterations. The loss decreases dramatically at first and then continues to decrease during later iterations.}
 \label{fig:iter}
 \end{figure}
 
